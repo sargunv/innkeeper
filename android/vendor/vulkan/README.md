@@ -46,6 +46,9 @@ on top of Vulkan (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
     video aborted SurfaceFlinger.
   - 0006 makes ANV's ANB imports use the mapper's explicit row pitches and
     offsets, without requiring the optional AHardwareBuffer pointer.
+  - 0007 adds an `ohos` platform that leaves out display WSI (`VK_KHR_display`).
+    That WSI calls `pthread_cancel`, which OpenHarmony's musl doesn't have, and
+    musl resolves every symbol when it loads a library.
 
 Tests: `tests/run.sh` runs in `mise run test:bionic`. It runs `vkdriver_test`
 (loading, compute, udmabuf import, ANB images, deferred binds),
@@ -54,3 +57,24 @@ checks YV12, NV12 and NV21 through EGLImage, as Skia imports them. The tests run
 on lavapipe and on the hardware driver that a normal launcher session selects.
 On hybrid systems, that is the selected GPU alone, because the broker permits
 only its node. Each invocation uses a fresh named Android session.
+
+## OpenHarmony
+
+The same build makes RADV and ANV for OpenHarmony
+([ohos/README.md](../../../ohos/README.md#display)). They install as
+`/vendor/lib64/chipsetsdk/libvulkan_{radeon,intel}.so`, with ICD manifests in
+`/vendor/etc/vulkan/icd.d`. OpenHarmony's Vulkan loader reads manifests from
+`/system/etc/vulkan/icd.d` and `/vendor/etc/vulkan/icd.d`, and each manifest
+names its driver by absolute path. The loader lists the GPU, but OH's swapchain
+layer refuses to create a device until the drivers support
+`VK_OHOS_native_buffer`.
+
+- **Toolchain.** The drivers build with the NDK's clang for `x86_64-linux-musl`
+  (`cross/ohos-x86_64.ini`). The sysroot is the build container's musl with the
+  container's kernel headers, and its `libc.so` gets the soname `libc.so` that
+  OpenHarmony's libraries use. `build.sh` builds compiler-rt, libc++abi and
+  libc++ for that sysroot from the pinned LLVM source, without exceptions.
+- **Self-contained drivers.** libdrm and libc++ are linked statically. The only
+  `DT_NEEDED` entry is `libc.so`, and the only exports are the three `vk_icd*`
+  entry points. `build.sh` checks both. The drivers have no shader cache, zlib
+  or window-system integration.

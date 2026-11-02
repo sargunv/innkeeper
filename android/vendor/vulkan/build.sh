@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # build:vulkan cross-builds the vendor Vulkan drivers (Mesa RADV, ANV and
-# lavapipe) for Android x86_64 with the pinned NDK in the build container
-# (tools/container/run.sh). It installs these into out/build/vulkan/install:
+# lavapipe) for Android x86_64, and RADV and ANV for OpenHarmony x86_64, with
+# the pinned NDK in the build container (tools/container/run.sh). It installs
+# these into out/build/vulkan/install:
 #   share/innkeeper/android/vendor/lib64/hw/vulkan.{radv,anv,lvp}.so
 #   share/innkeeper/android/vendor/etc/libdrm/amdgpu.ids
 #   share/innkeeper/props.d/vulkan.prop
+#   share/innkeeper/ohos/vendor/lib64/chipsetsdk/libvulkan_{radeon,intel}.so
+#   share/innkeeper/ohos/vendor/etc/vulkan/icd.d/{radeon,intel}_icd.x86_64.json
+#   share/innkeeper/ohos/vendor/etc/libdrm/amdgpu.ids
 # It also builds the test programs that tests/run.sh runs
 # (out/build/vulkan/{test,test-vendor}). The build is skipped when its inputs
 # (this directory, the container and the toolchain pin) still hash to
@@ -309,7 +313,135 @@ build_test() {
   "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$work/test-vendor/lib64/hw/mapper.inkptest.so" "$here/tests/mock_mapper.c"
 }
 
+# ---- OpenHarmony ------------------------------------------------------------
+# OpenHarmony's processes run on the image's musl. These drivers build with the
+# NDK's clang against the container's musl, and they link compiler-rt, libc++abi
+# and libc++ statically. build_musl_runtimes builds those from the pinned LLVM
+# source.
+ohos_vendor=$work/install/share/innkeeper/ohos/vendor
+musl=$build/musl
+ohos_deps=$work/deps-ohos
+
+build_musl_runtimes() {
+  local sys=$musl/sysroot res=$musl/resource
+  fetch llvm-project "$LLVM_URL" "$LLVM_TAG"
+  rm -rf "$musl"
+  mkdir -p "$sys/usr/lib" "$res"
+  cp -r /usr/x86_64-linux-musl/include "$sys/usr/include"
+  # musl's package has no kernel headers.
+  cp -r /usr/include/{linux,asm,asm-generic} "$sys/usr/include/"
+  cp -rL /usr/x86_64-linux-musl/lib64/. "$sys/usr/lib/"
+  # OpenHarmony's libraries need musl as libc.so.
+  patchelf --set-soname libc.so "$sys/usr/lib/libc.so"
+  cp -r "$("$ndk_bin/clang" -print-resource-dir)/include" "$res/include"
+  local flags="-resource-dir=$res" t=x86_64-linux-musl b=$build/musl-runtimes
+  rm -rf "$b"
+  cmake -GNinja -S "$src/llvm-project/runtimes" -B "$b" \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSROOT="$sys" -DCMAKE_INSTALL_PREFIX="$sys/usr" \
+    -DCMAKE_C_COMPILER="$ndk_bin/clang" -DCMAKE_CXX_COMPILER="$ndk_bin/clang++" \
+    -DCMAKE_ASM_COMPILER="$ndk_bin/clang" -DCMAKE_AR="$ndk_bin/llvm-ar" \
+    -DCMAKE_RANLIB="$ndk_bin/llvm-ranlib" -DCMAKE_C_COMPILER_TARGET=$t \
+    -DCMAKE_CXX_COMPILER_TARGET=$t -DCMAKE_ASM_COMPILER_TARGET=$t \
+    -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+    -DCMAKE_C_FLAGS="$flags" -DCMAKE_CXX_FLAGS="$flags" -DCMAKE_ASM_FLAGS="$flags" \
+    -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxxabi;libcxx" -DLLVM_DEFAULT_TARGET_TRIPLE=$t \
+    -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF -DLLVM_INCLUDE_TESTS=OFF \
+    -DCOMPILER_RT_INSTALL_PATH="$res" -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
+    -DCOMPILER_RT_BUILD_BUILTINS=ON -DCOMPILER_RT_BUILD_CRT=ON \
+    -DCOMPILER_RT_BUILD_SANITIZERS=OFF -DCOMPILER_RT_BUILD_XRAY=OFF \
+    -DCOMPILER_RT_BUILD_LIBFUZZER=OFF -DCOMPILER_RT_BUILD_PROFILE=OFF \
+    -DCOMPILER_RT_BUILD_MEMPROF=OFF -DCOMPILER_RT_BUILD_ORC=OFF \
+    -DCOMPILER_RT_BUILD_CTX_PROFILE=OFF -DCOMPILER_RT_INCLUDE_TESTS=OFF \
+    -DLIBCXX_HAS_MUSL_LIBC=ON -DLIBCXX_ENABLE_SHARED=OFF -DLIBCXXABI_ENABLE_SHARED=OFF \
+    -DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON -DLIBCXX_HERMETIC_STATIC_LIBRARY=ON \
+    -DLIBCXXABI_HERMETIC_STATIC_LIBRARY=ON -DLIBCXX_ENABLE_EXCEPTIONS=OFF \
+    -DLIBCXXABI_ENABLE_EXCEPTIONS=OFF -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
+    -DLIBCXX_USE_COMPILER_RT=ON -DLIBCXXABI_USE_COMPILER_RT=ON \
+    -DLIBCXX_INCLUDE_BENCHMARKS=OFF -DLIBCXX_INCLUDE_TESTS=OFF -DLIBCXXABI_INCLUDE_TESTS=OFF
+  ninja -C "$b" -j "$JOBS" install
+}
+
+ohos_meson() {
+  PKG_CONFIG_LIBDIR=$ohos_deps/vendor/lib64/pkgconfig PKG_CONFIG_SYSROOT_DIR=$ohos_deps \
+    meson "$@"
+}
+
+build_libdrm_ohos() {
+  fetch libdrm "$LIBDRM_URL" "$LIBDRM_TAG"
+  local b=$build/libdrm-ohos
+  # shellcheck disable=SC2046 # reconf prints zero or one flag
+  ohos_meson setup $(reconf "$b") "$b" "$src/libdrm" "${ohos_cross[@]}" \
+    --prefix=/vendor --libdir=lib64 --datadir=etc \
+    -Ddefault_library=static -Dbuildtype=release \
+    -Damdgpu=enabled -Dintel=disabled -Dradeon=disabled -Dnouveau=disabled \
+    -Dvmwgfx=disabled -Dfreedreno=disabled -Dvc4=disabled -Detnaviv=disabled \
+    -Dexynos=disabled -Domap=disabled -Dtegra=disabled -Dcairo-tests=disabled \
+    -Dvalgrind=disabled -Dman-pages=disabled -Dtests=false -Dinstall-test-programs=false
+  meson compile -C "$b" -j "$JOBS"
+  DESTDIR=$ohos_deps meson install -C "$b" --quiet
+  install -Dm644 "$ohos_deps/vendor/etc/libdrm/amdgpu.ids" "$ohos_vendor/etc/libdrm/amdgpu.ids"
+}
+
+build_ohos() {
+  build_musl_runtimes
+  cat >"$build/ohos.ini" <<EOF
+[constants]
+ndk_bin = '$ndk_bin'
+sysroot = '$musl/sysroot'
+resource = '$musl/resource'
+EOF
+  ohos_cross=(--cross-file "$build/ohos.ini" --cross-file "$here/cross/ohos-x86_64.ini")
+  build_shader_tools
+  build_libdrm_ohos
+  fetch mesa "$MESA_URL" "$MESA_TAG"
+  local b=$build/mesa-ohos
+  # shellcheck disable=SC2046 # reconf prints zero or one flag
+  ohos_meson setup $(reconf "$b") "$b" "$src/mesa" "${ohos_cross[@]}" \
+    --prefix=/vendor --libdir=lib64/chipsetsdk \
+    -Dbuildtype=release -Db_ndebug=true -Dcpp_eh=none \
+    -Dplatforms=ohos -Dvulkan-drivers=amd,intel -Dgallium-drivers= \
+    -Dllvm=disabled -Damd-use-llvm=false -Dmesa-clc=system -Dintel-rt=disabled \
+    -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dopengl=false \
+    -Dgles1=disabled -Dgles2=disabled -Dshader-cache=disabled \
+    -Dzlib=disabled -Dzstd=disabled -Dexpat=disabled -Dxmlconfig=disabled \
+    -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
+    -Dperfetto=false -Dvulkan-layers= -Dtools= -Dbuild-tests=false \
+    -Dvideo-codecs=all_free -Dspirv-tools=disabled
+  meson compile -C "$b" -j "$JOBS"
+  local name
+  for name in amd/vulkan/libvulkan_radeon intel/vulkan/libvulkan_intel; do
+    local so=$ohos_vendor/lib64/chipsetsdk/${name##*/}.so
+    install -d "${so%/*}"
+    "$ndk_bin/llvm-objcopy" --strip-unneeded "$b/src/$name.so" "$so"
+    chmod 644 "$so"
+    check_elf_ohos "$so"
+  done
+  # The loader reads ICD manifests from /vendor/etc/vulkan/icd.d. Mesa's
+  # manifests name each driver by its absolute path.
+  install -D -m644 -t "$ohos_vendor/etc/vulkan/icd.d" \
+    "$b/src/amd/vulkan/radeon_icd.x86_64.json" "$b/src/intel/vulkan/intel_icd.x86_64.json"
+}
+
+# OpenHarmony's drivers may only need musl, and they export only the ICD
+# entry points.
+check_elf_ohos() {
+  local f=$1 needed exports
+  needed=$(readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
+  exports=$(readelf -sW --dyn-syms "$f" | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") {print $8}' | sort -u | paste -sd' ')
+  echo "check_elf_ohos: $(basename "$f") NEEDED: ${needed//$'\n'/ }; exports: $exports"
+  if [[ $needed != libc.so ]]; then
+    echo "check_elf_ohos: $f: needs more than libc.so" >&2
+    return 1
+  fi
+  if [[ $exports != "vk_icdGetInstanceProcAddr vk_icdGetPhysicalDeviceProcAddr vk_icdNegotiateLoaderICDInterfaceVersion" ]]; then
+    echo "check_elf_ohos: $f exports more than the ICD entry points" >&2
+    return 1
+  fi
+}
+
 build_hardware
 build_lvp
 install_etc
 build_test
+build_ohos
