@@ -52,12 +52,12 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   to the probe window's ArkUI dump on a beta build, so the test sets
   `const.logsystem.versiontype`. hilog still holds the line that Innkeeper
   System logged at boot. The probe plays a video clip and renders its first
-  frame, and on a GPU the clip's color reaches the desktop. OpenHarmony's music
-  volume must be at its maximum, and a tone it plays must reach a private null
-  sink. The probe, granted the microphone, must record a tone that the host
-  plays into that sink. A notification that the probe posts reaches the
-  desktop's notification server with its buttons, and invoking its first button
-  there reaches the probe. The probe's media session is an MPRIS player on the
+  frame, and the clip's color reaches the desktop. OpenHarmony's music volume
+  must be at its maximum, and a tone it plays must reach a private null sink.
+  The probe, granted the microphone, must record a tone that the host plays into
+  that sink. A notification that the probe posts reaches the desktop's
+  notification server with its buttons, and invoking its first button there
+  reaches the probe. The probe's media session is an MPRIS player on the
   desktop's session bus with its title, artist, length and artwork, and MPRIS
   `PlayPause` pauses it in the probe. OpenHarmony takes the session's time zone
   and turns dark when the desktop's portal does. The open window keeps the

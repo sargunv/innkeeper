@@ -1050,12 +1050,6 @@ else
       >>"$T/ohos.txt" 2>&1 || return
     rendered() { s /system/bin/hilog -x -T InnkeeperProbes | grep -q 'video frame$'; }
     until_ok rendered || return
-    # render_service composes the YUV frames with GL. On a GPU, our EGL
-    # imports them, and the clip's color reaches the desktop. The image's EGL
-    # can't import YUV buffers, so without a GPU the video stays black.
-    # shellcheck disable=SC2016 # expanded in OpenHarmony
-    s /system/bin/sh -c 'for n in /dev/dri/renderD*; do (: <"$n") 2>/dev/null && exit 0; done; exit 1' ||
-      return 0
     shown() {
       desktop Screenshot "$T/video.png" >/dev/null &&
         /usr/bin/python3 "$here/colour.py" "$T/video.png" 255 0 255
@@ -1066,7 +1060,7 @@ else
     s /system/bin/hilog -x -T InnkeeperProbes | grep video | tail -n 5 >&2
     exit 1
   fi
-  echo "ok   the probe plays a video, and on a GPU its frames reach the desktop"
+  echo "ok   the probe plays a video, and its frames reach the desktop"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_audio() {
     local recorder player result=0
