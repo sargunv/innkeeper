@@ -491,7 +491,10 @@ its own lock screen. OH's own injector also drives the screen over `exec`.
   `hidumper -s RenderService -a gles` names the GPU. Without a GPU, as in CI,
   the image's Mesa stays, and render_service draws with llvmpipe
   (`LIBGL_ALWAYS_SOFTWARE`). `INNKEEPER_VULKAN=lvp` picks software. The image's
-  EGL doesn't import YUV buffers, so video shows black without a GPU.
+  EGL doesn't import YUV buffers. Video still shows without a GPU, because the
+  host compositor draws it ([Video layers](#video-layers)). A video under a
+  blurred panel, such as the control centre, is drawn by render_service again,
+  and without a GPU it shows black there.
 - **Native fences.** The image's llvmpipe finishes every GL context in the
   process whenever it exports a native fence fd, and EGL exports one on each
   swap. render_service draws on several threads, and a swap on one thread would
@@ -513,11 +516,12 @@ file changes.
 - **Composer** (`libdisplay_composer_vdi_impl.z.so`). It reports one display, 0,
   at 60 Hz in the panel's mode. The display is a built-in panel, so OH uses it
   as the main screen. render_service's uni-render output is one full-screen
-  device layer, and the composer shows that buffer itself. With any other set of
-  layers, render_service composes every layer (`COMPOSITION_CLIENT`) into a
-  client target with GL, which costs about 60% more render_service CPU on
-  llvmpipe. Each shown buffer goes to the bridge's display service as an opaque
-  LINEAR dma-buf, through the shared
+  device layer, and the composer shows that buffer as the window's frame,
+  together with any [video layers](#video-layers). With any other set of layers,
+  render_service composes every layer (`COMPOSITION_CLIENT`) into a client
+  target with GL, which costs about 60% more render_service CPU on llvmpipe.
+  Each shown buffer goes to the bridge's display service as a LINEAR dma-buf,
+  through the shared
   [bridge client](../guest/bridge-client/include/innkeeper/bridge_client.h).
   `DISPLAY_WINDOW` gives the display its own desktop window. Commit waits up to
   two frames for the compositor to release the other buffers, so render_service
@@ -545,10 +549,41 @@ file changes.
   before the HDI sees it. Layers reach the composer separately only when
   render_service offloads them to hardware composition. It does that for
   self-drawing surfaces such as video and XComponent, but not for ordinary ArkUI
-  windows. SceneBoard's window manager puts apps on screen 0, and it also owns
-  OH's floating and freeform modes. A window per app would need one OH screen
-  per app window, plus an OH window policy that places each app on its own
-  screen. The bridge therefore shows screen 0 as one phone-frame window.
+  windows ([Video layers](#video-layers)). SceneBoard's window manager puts apps
+  on screen 0, and it also owns OH's floating and freeform modes. A window per
+  app would need one OH screen per app window, plus an OH window policy that
+  places each app on its own screen. The bridge therefore shows screen 0 as one
+  phone-frame window.
+
+### Video layers
+
+render_service gives the composer a self-drawing surface, such as a video in an
+XComponent, as a layer of its own when the surface asks for hardware composition
+and nothing over it needs its pixels, such as a blur. The broker reports the
+caller's pid for oneway binder calls, which render_service checks before it
+grants that request ([supervisor](../supervisor/README.md#openharmony)).
+render_service puts the video under its frame and leaves a transparent hole
+there.
+
+The composer takes such a layer when it is an opaque, untransformed NV12 layer
+and the rest of the screen is the uni-render output
+([layers.h](vendor/display/layers.h)). It clips the layer to the screen. Its
+`LAYERS` request gives the bridge each video's buffer, position and crop, and
+says which layers go under the frame. The frame then keeps its alpha, so the
+holes show the video. Other layers, such as a rotated or translucent video, go
+to render_service's GL.
+
+The bridge shows each layer as a subsurface of the window, scaled with
+`wp_viewport`, and imports the NV12 buffer through linux-dmabuf. The host
+compositor converts it to RGB, as BT.601 limited range through
+`wp_color_representation_v1` where the compositor has it. Our buffers carry no
+colour metadata, and Mesa imports them the same way on the GPU path. A
+compositor without that protocol picks its own matrix, so colours can shift
+slightly. A layer whose dma-buf the compositor refuses, or the layer of a hidden
+window, shows a copy that the bridge converts on the CPU. render_service then
+draws neither the video nor a copy of its frame, and its CPU while the probe's
+clip plays drops from 0.11 to 0.025 cores on RADV, and from 2 to 4 cores to 0.03
+on llvmpipe.
 
 ## Input
 
