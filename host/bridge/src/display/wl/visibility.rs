@@ -106,6 +106,9 @@ pub(super) fn snapshot(
 fn copy_pixels(source: &[u8], canvas: &mut [u8], spec: &super::BufferSpec) {
     use super::super::proto::fourcc;
     let stride = spec.width as usize * 4;
+    if spec.fourcc == fourcc::NV12 {
+        return copy_nv12(source, canvas, spec);
+    }
     let bpp = fourcc::bytes_per_pixel(spec.fourcc).unwrap() as usize;
     for (row, dst) in canvas.chunks_exact_mut(stride).enumerate() {
         let offset = spec.offset as usize + row * spec.stride as usize;
@@ -147,9 +150,71 @@ fn copy_pixels(source: &[u8], canvas: &mut [u8], spec: &super::BufferSpec) {
     }
 }
 
+/// Converts NV12 to ARGB8888 as BT.601 limited range, which is how Mesa
+/// imports the buffer VDI's YUV buffers on the GPU path, since they carry no
+/// colour metadata.
+fn copy_nv12(source: &[u8], canvas: &mut [u8], spec: &super::BufferSpec) {
+    let (offset, stride) = (spec.offset as usize, spec.stride as usize);
+    let chroma = offset + stride * spec.height as usize;
+    let rows = canvas.chunks_exact_mut(spec.width as usize * 4);
+    for (y, dst) in rows.enumerate() {
+        let luma = &source[offset + y * stride..];
+        let uv = &source[chroma + y / 2 * stride..];
+        for (x, pixel) in dst.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let c = 298 * (i32::from(luma[x]) - 16);
+            let d = i32::from(uv[x / 2 * 2]) - 128;
+            let e = i32::from(uv[x / 2 * 2 + 1]) - 128;
+            let channel = |v: i32| ((v + 128) >> 8).clamp(0, 255) as u8;
+            let (r, g, b) = (
+                channel(c + 409 * e),
+                channel(c - 100 * d - 208 * e),
+                channel(c + 516 * d),
+            );
+            *pixel = [b, g, r, 255];
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nv12_converts_each_two_by_two_block_with_its_chroma() {
+        use super::super::super::proto::{BufferSpec, fourcc};
+        let spec = BufferSpec {
+            buffer: 1,
+            display: 1,
+            width: 4,
+            height: 2,
+            fourcc: fourcc::NV12,
+            stride: 6,
+            offset: 0,
+            modifier: 0,
+        };
+        // Two luma rows of 6 bytes (4 pixels and padding), then one chroma
+        // row. The left block is magenta, which is Y 107, Cb 202, Cr 222 at
+        // BT.601 limited range. The right block has neutral chroma, with
+        // black (Y 16) and white (Y 235) pixels.
+        let source = [
+            107, 107, 16, 235, 0, 0, //
+            107, 107, 235, 16, 0, 0, //
+            202, 222, 128, 128, 0, 0,
+        ];
+        let mut pixels = [0; 32];
+        copy_pixels(&source, &mut pixels, &spec);
+        let px = |i: usize| <[u8; 4]>::try_from(&pixels[i * 4..i * 4 + 4]).unwrap();
+        let close = |a: [u8; 4], b: [u8; 4]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 2);
+        for i in [0, 1, 4, 5] {
+            assert!(close(px(i), [255, 0, 255, 255]), "{i}: {:?}", px(i)); // BGRA
+        }
+        for i in [2, 7] {
+            assert_eq!(px(i), [0, 0, 0, 255], "{i}");
+        }
+        for i in [3, 6] {
+            assert_eq!(px(i), [255, 255, 255, 255], "{i}");
+        }
+    }
 
     #[test]
     fn wide_formats_downconvert_to_the_same_sdr_pixel() {
