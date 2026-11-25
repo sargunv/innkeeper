@@ -1,9 +1,9 @@
 /*
  * Runs the Vulkan half of ANGLE's AHardwareBuffer import step by step for
  * buffers with an external format: YUV buffers, and the IMPLEMENTATION_DEFINED
- * buffers that a virtual display composed by the HWC queues to a SurfaceTexture
- * sink, as the overlay display's TextureView in system_server gets. The steps
- * are vkGetAndroidHardwareBufferPropertiesANDROID, an image with the external
+ * buffers that SurfaceFlinger queues to a virtual display's SurfaceTexture
+ * sink, such as a simulated secondary display's TextureView. The steps are
+ * vkGetAndroidHardwareBufferPropertiesANDROID, an image with the external
  * format, the AHB memory import, the bind and a VkSamplerYcbcrConversion. The
  * test prints the step that fails, because ANGLE only reports
  * EGL_BAD_PARAMETER.
