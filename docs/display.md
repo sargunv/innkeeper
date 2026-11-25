@@ -212,6 +212,12 @@ bytes, which RADV requires. An allocation with GPU usage fails if it can't get a
 dma-buf, because its consumers can't import a plain memfd. Window sinks are
 LINEAR and CPU-readable so that the bridge can snapshot hidden windows.
 
+`IMPLEMENTATION_DEFINED` buffers are NV12 for camera and video usage and RGBX
+otherwise, as in minigbm. An importer sees only the requested format, so Mesa
+reads the fourcc from the mapper, and XBGR8888 is the RGB fourcc it accepts.
+SurfaceFlinger queues such buffers to a SurfaceTexture sink of a virtual
+display, as the TextureView of a simulated secondary display has.
+
 The bridge imports a sink's format only if linux-dmabuf advertises it. Otherwise
 it sends an 8-bit `wl_shm` copy. SurfaceFlinger converts colour for the SDR
 displays. The composer waits on acquire fences and exports sync_files for

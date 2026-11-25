@@ -1,9 +1,12 @@
 /*
- * Runs the Vulkan half of ANGLE's AHardwareBuffer import step by step for YUV
- * buffers. The steps are vkGetAndroidHardwareBufferPropertiesANDROID, an image
- * with the external format, the AHB memory import, the bind and a
- * VkSamplerYcbcrConversion. The test prints the step that fails, because ANGLE
- * only reports EGL_BAD_PARAMETER.
+ * Runs the Vulkan half of ANGLE's AHardwareBuffer import step by step for
+ * buffers with an external format: YUV buffers, and the IMPLEMENTATION_DEFINED
+ * buffers that a virtual display composed by the HWC queues to a SurfaceTexture
+ * sink, as the overlay display's TextureView in system_server gets. The steps
+ * are vkGetAndroidHardwareBufferPropertiesANDROID, an image with the external
+ * format, the AHB memory import, the bind and a VkSamplerYcbcrConversion. The
+ * test prints the step that fails, because ANGLE only reports
+ * EGL_BAD_PARAMETER.
  */
 #define VK_USE_PLATFORM_ANDROID_KHR 1
 #include <android/hardware_buffer.h>
@@ -14,14 +17,16 @@
 static VkDevice dev;
 static VkPhysicalDevice pdev;
 
-static int test(uint32_t format, const char* name) {
+static int test(
+  uint32_t format, uint32_t width, uint32_t height, uint64_t usage,
+  const char* name
+) {
   AHardwareBuffer_Desc desc = {
-    .width = 896,
-    .height = 480,
+    .width = width,
+    .height = height,
     .layers = 1,
     .format = format,
-    .usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
-             AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
+    .usage = usage,
   };
   AHardwareBuffer* ahb;
   if (AHardwareBuffer_allocate(&desc, &ahb)) {
@@ -65,7 +70,7 @@ static int test(uint32_t format, const char* name) {
     .pNext = &emi,
     .imageType = VK_IMAGE_TYPE_2D,
     .format = fp.format,
-    .extent = {896, 480, 1},
+    .extent = {width, height, 1},
     .mipLevels = 1,
     .arrayLayers = 1,
     .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -168,9 +173,19 @@ int main(void) {
     return 1;
   }
   int fails = 0;
-  fails += test(0x32315659, "YV12");
-  fails += test(AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420, "YCbCr_420_888");
-  fails += test(0x11, "NV21");
+  const uint64_t video = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+                         AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN;
+  fails += test(0x32315659, 896, 480, video, "YV12");
+  fails +=
+    test(AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420, 896, 480, video, "YCbCr_420_888");
+  fails += test(0x11, 896, 480, video, "NV21");
+  // A GPU-only IMPLEMENTATION_DEFINED buffer, the overlay display's size.
+  fails += test(
+    0x22, 1240, 1080,
+    AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+      AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY,
+    "IMPLEMENTATION_DEFINED"
+  );
   printf("%s\n", fails ? "SOME FAILED" : "ALL OK");
   return fails != 0;
 }

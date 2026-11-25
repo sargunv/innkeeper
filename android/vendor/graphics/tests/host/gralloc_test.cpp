@@ -132,7 +132,9 @@ static void testLayouts() {
   CHECK(computeLayout(
     fmt::IMPLEMENTATION_DEFINED, 64, 64, 1, usage::GPU_TEXTURE, &l
   ));
-  CHECK_EQ(l.resolvedFormat, fmt::RGBA_8888);
+  // Mesa's AHB import accepts XBGR8888 alone as an RGB external format.
+  CHECK_EQ(l.resolvedFormat, fmt::RGBX_8888);
+  CHECK_EQ(l.fourcc, fourcc('X', 'B', '2', '4'));
   CHECK(computeLayout(
     fmt::IMPLEMENTATION_DEFINED, 64, 64, 1, usage::VIDEO_DECODER, &l
   ));

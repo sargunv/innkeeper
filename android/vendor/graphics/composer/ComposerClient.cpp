@@ -174,9 +174,9 @@ ndk::ScopedAStatus ComposerClient::createVirtualDisplay(
   mDisplays.emplace(id, std::move(d));
   out->display = id;
   // The sink decides the format. Our gralloc resolves "implementation
-  // defined" sinks (an ImageReader with PRIVATE format) to RGBA_8888.
+  // defined" sinks (an ImageReader with PRIVATE format) to RGBX_8888.
   out->format = format == common::PixelFormat::IMPLEMENTATION_DEFINED
-                  ? common::PixelFormat::RGBA_8888
+                  ? common::PixelFormat::RGBX_8888
                   : format;
   LOGI(
     "virtual display %lld created: %dx%d format %d, %d output slots",
