@@ -23,11 +23,11 @@ GPU, audio and input, and connects them to your desktop.
 
 You need an x86_64 Linux desktop on Wayland with a GPU, Linux 6.5 or newer, and
 Flatpak 1.15.6 or newer with the Flathub remote. Download
-`dev.sargunv.Innkeeper.flatpak` from the
-[latest release](https://github.com/sargunv/innkeeper/releases/latest) and
-install it:
+[dev.sargunv.Innkeeper.flatpak](https://github.com/sargunv/innkeeper/releases/latest/download/dev.sargunv.Innkeeper.flatpak)
+from the latest release and install it:
 
 ```sh
+curl -LO https://github.com/sargunv/innkeeper/releases/latest/download/dev.sargunv.Innkeeper.flatpak
 flatpak install --user ./dev.sargunv.Innkeeper.flatpak
 ```
 
@@ -56,8 +56,9 @@ options.
 A profile can run OpenHarmony instead of Android. You choose the system when you
 create the profile, for example with
 `innkeeper profile create --system ohos harmony`. OpenHarmony support is
-experimental. Its built-in apps show in one phone window, and it doesn't support
-desktop input or app installation yet ([ohos](ohos/README.md)).
+experimental. Its screen shows in one phone window, which takes the desktop's
+pointer, touch and keyboard input. Install HAPs with **+** in Innkeeper or with
+`innkeeper install` ([ohos](ohos/README.md)).
 
 All apps run as one uid, so they are not isolated from each other. Native
 desktop apps aren't isolated from each other either
