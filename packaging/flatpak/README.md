@@ -12,10 +12,9 @@ FLATPAK_USER_DIR=$PWD/out/flatpak/user flatpak run dev.sargunv.Innkeeper list
 ```
 
 `mise run package` runs `mise run build`. Then `build.sh` packs
-`out/release/<app>-<channel>.flatpak` from the committed tree, and it refuses to
-run with uncommitted changes. `--install` reinstalls that bundle into
-`FLATPAK_USER_DIR`, which defaults to the user installation. The bundle has
-these parts:
+`out/release/<app>.flatpak` from the committed tree, and it refuses to run with
+uncommitted changes. `--install` reinstalls that bundle into `FLATPAK_USER_DIR`,
+which defaults to the user installation. The bundle has these parts:
 
 - **The desktop side** (CLI, manager, bridge, launcher) is built offline by
   flatpak-builder on the `org.gnome.Platform` runtime, from `git archive HEAD`
@@ -34,31 +33,26 @@ these parts:
 a single-file bundle to a GitHub Release. There is no Flatpak repository, so
 users install each newer bundle by hand.
 
-A successful CI run on a push to `main` builds `<app>-snapshot.flatpak` from the
-stage that CI saved for that commit. A newer push cancels a snapshot build in
-progress. The workflow uploads the bundle to a floating prerelease named
-`snapshot`, deletes any other asset there, and force-moves the `snapshot` tag to
-the commit. The release notes give the commit, the build time and the install
-command.
-
-A pushed `v*` tag builds `<app>-stable.flatpak` and attaches it to that tag's
-release. The workflow creates the release with generated notes if it doesn't
-exist. A `workflow_dispatch` run defaults to a dry run and uploads nothing.
+Versions are CalVer tags, such as `v2026.11.0`. A pushed `v*` tag builds
+`<app>.flatpak` and attaches it to a draft release for that tag, which the
+maintainer gives notes and publishes. A tag with a suffix, such as
+`v2026.12.0-rc.1`, makes a prerelease. Prereleases and releases share the
+Flatpak's `stable` branch, so a user moves between them by installing the other
+file. The job restores the stage that CI saved for the tagged commit, or builds
+it. A `workflow_dispatch` run builds the bundle and keeps it as a workflow
+artifact for 7 days.
 
 The bundle is made with
 `flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo`,
 so the GNOME runtime installs from Flathub. The bundle has no update repo. A
-snapshot's version is `0.0.<git rev-list --count HEAD>`, and the commit subject
-holds the short SHA. The package job checks out the full history so that the
-count is correct. A tag's version is the tag without the leading `v`. The app id
-comes from the manifest. A snapshot build restores the stage that CI saved for
-the commit and fails if it is missing. A tag or a manual run builds the stage
-when the cache has none.
+tagged build's version is the tag without the leading `v`. An untagged build's
+version is `0.0.<git rev-list --count HEAD>`, and the commit subject holds the
+short SHA. The package job checks out the full history so that the count is
+correct. The app id comes from the manifest.
 
 Users install a bundle as described in the [README](../../README.md#install).
 
-`mise run package` builds the same bundle locally on the snapshot channel and
-doesn't publish it. `mise run package -- stable` needs a `v*` tag on HEAD.
+`mise run package` builds the same bundle locally and doesn't publish it.
 
 The session runs inside the sandbox ([session.md](../../docs/session.md)).
 `start` runs it in a separate sandbox through the Flatpak portal's Spawn method.
