@@ -115,14 +115,17 @@ const FormatInfo* formatInfo(int32_t format) {
 
 int32_t resolveFormat(int32_t format, uint64_t u) {
   if (format == fmt::IMPLEMENTATION_DEFINED) {
-    // Camera/video paths expect YUV; everything else gets RGBA.
+    // Camera/video paths expect YUV; everything else gets RGBX. An importer
+    // sees only the requested format, so Mesa takes an external format from
+    // the fourcc and accepts XBGR8888 alone for RGB, as minigbm and
+    // gbm_gralloc resolve it. With ABGR8888, hwui's TextureView import fails.
     if (
       u & (usage::VIDEO_ENCODER | usage::VIDEO_DECODER | usage::CAMERA_OUTPUT |
            usage::CAMERA_INPUT)
     ) {
       return fmt::YCBCR_420_888;
     }
-    return fmt::RGBA_8888;
+    return fmt::RGBX_8888;
   }
   return formatInfo(format) ? format : 0;
 }
