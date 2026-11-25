@@ -23,12 +23,12 @@ GPU, audio and input, and connects them to your desktop.
 
 You need an x86_64 Linux desktop on Wayland with a GPU, Linux 6.5 or newer, and
 Flatpak 1.15.6 or newer with the Flathub remote. Download
-`dev.sargunv.Innkeeper-snapshot.flatpak` from the
-[snapshot release](https://github.com/sargunv/innkeeper/releases/tag/snapshot)
-and install it:
+`dev.sargunv.Innkeeper.flatpak` from the
+[latest release](https://github.com/sargunv/innkeeper/releases/latest) and
+install it:
 
 ```sh
-flatpak install --user ./dev.sargunv.Innkeeper-snapshot.flatpak
+flatpak install --user ./dev.sargunv.Innkeeper.flatpak
 ```
 
 Innkeeper doesn't update itself yet. To update, install a newer file with

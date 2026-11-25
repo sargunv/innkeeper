@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Build the Innkeeper Flatpak bundle from the committed tree into
-# out/release/<app>-<channel>.flatpak, and optionally install it.
+# out/release/<app>.flatpak, and optionally install it.
 #
-#   packaging/flatpak/build.sh [snapshot|stable] [--install]
+#   packaging/flatpak/build.sh [--install]
 #
-# A snapshot bundle (the default) has the version 0.0.<git rev-list --count
-# HEAD>, and a stable bundle takes its version from the v* tag on HEAD. The
-# bundle isn't signed or published in an OSTree repo. Users install the file
-# and update by installing a newer file. The GNOME runtime comes from Flathub.
-# --install reinstalls the bundle into FLATPAK_USER_DIR, which defaults to the
-# user installation.
+# The bundle is on the stable branch. Its version is the v* tag on HEAD without
+# the v, or 0.0.<git rev-list --count HEAD> for an untagged commit. The bundle
+# isn't signed or published in an OSTree repo. Users install the file and update
+# by installing a newer file. The GNOME runtime comes from Flathub. --install
+# reinstalls the bundle into FLATPAK_USER_DIR, which defaults to the user
+# installation.
 #
 # flatpak-builder builds the desktop side inside the GNOME SDK from
 # `git archive HEAD`. The guest side comes from out/stage (`mise run build`),
@@ -23,28 +23,24 @@ rel=$top/out/release
 manifest=$here/dev.sargunv.Innkeeper.yml
 cd "$top"
 
-channel=snapshot install=false
+install=false
 for arg in "$@"; do
   case $arg in
-    snapshot | stable) channel=$arg ;;
     --install) install=true ;;
     *)
-      echo "build.sh: usage: build.sh [snapshot|stable] [--install]" >&2
+      echo "build.sh: usage: build.sh [--install]" >&2
       exit 2
       ;;
   esac
 done
 id=$(sed -n 's/^id: //p' "$manifest")
-if [[ $channel == stable ]]; then
-  version=$(git describe --tags --exact-match --match 'v*' 2>/dev/null) || {
-    echo "build.sh: a stable bundle needs a v* tag on HEAD" >&2
-    exit 1
-  }
+branch=stable
+if version=$(git describe --tags --exact-match --match 'v*' 2>/dev/null); then
   version=${version#v}
   subject="Release $version"
 else
   version=0.0.$(git rev-list --count HEAD)
-  subject="snapshot $(git rev-parse --short=7 HEAD)"
+  subject="Untagged $(git rev-parse --short=7 HEAD)"
 fi
 
 if ! git diff --quiet HEAD --; then
@@ -88,13 +84,13 @@ FLATPAK_USER_DIR=$tools flatpak run --user --env=FLATPAK_USER_DIR="$sdk" \
   --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse \
   --state-dir="$out/state" "$out/build" "$manifest"
 flatpak build-export --subject="$version" --body="$subject" \
-  "$rel/repo" "$out/build" "$channel"
+  "$rel/repo" "$out/build" "$branch"
 # The bundle leaves out the runtime, which an install fetches from Flathub.
 # There is no --repo-url because users update by installing a newer bundle.
-bundle=$rel/$id-$channel.flatpak
-flatpak build-bundle --runtime-repo="$flathub" "$rel/repo" "$bundle" "$id" "$channel"
+bundle=$rel/$id.flatpak
+flatpak build-bundle --runtime-repo="$flathub" "$rel/repo" "$bundle" "$id" "$branch"
 rm -rf "$rel/repo"
-echo "build.sh: $bundle ($id $channel $version, $subject)"
+echo "build.sh: $bundle ($id $branch $version, $subject)"
 
 if $install; then
   flatpak remote-add --user --if-not-exists flathub "$flathub"

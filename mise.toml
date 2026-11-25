@@ -113,7 +113,7 @@ description = "InnkeeperProbes.hap for the OpenHarmony tests (out/test/probes), 
 run = "ohos/probe/build.sh"
 
 [tasks.package]
-description = "Build the stage and the Flatpak bundle in out/release/ (-- [stable] [--install])"
+description = "Build the stage and the Flatpak bundle in out/release/ (-- [--install])"
 depends = ["build"]
 run = "packaging/flatpak/build.sh"
 
