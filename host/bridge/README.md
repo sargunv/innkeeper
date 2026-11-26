@@ -49,7 +49,8 @@ compositor offers it. GNOME has no data control protocol, so the bridge uses the
 display connection's `wl_data_device` and its keyboard-enter serial there. On
 GNOME, sync works only while an Innkeeper window has focus, as with Waydroid. A
 host copy arrives when an Innkeeper window regains focus. An Android copy made
-without focus is offered at the next keyboard enter.
+without focus, or one GNOME refuses because focus moved before it arrived, is
+offered at the next keyboard enter.
 
 A file copy holds up to 16 regular files and preserves each file's name, MIME
 type and bytes. Each file can be at most 16 MiB minus 1024 bytes. The whole
