@@ -57,6 +57,19 @@
 //! window of the rotated shape, and maps input to the rotated display. The
 //! reply is `-ENOENT` if the window is not shown.
 //!
+//! `WINDOW_DIALOG` (0x060f): u32 display, u32 parent display (`0xffffffff`
+//! for none), u32 flags (1 hold, 2 backdrop), u32 x, u32 y, u32 width, u32
+//! height (display pixels; a 0x0 size for none). It is for a translucent
+//! task, such as a dialog-themed activity (docs/display.md, "Dialogs"). The
+//! bridge makes the parent's toplevel the window's parent. With a size, the
+//! window shows only that rectangle of its display, trimmed to what the frame
+//! draws inside a uniform translucent border, at that size. It doesn't resize
+//! or rescale the display. With hold, sent with a queued request, the window
+//! shows no frame until a WINDOW_DIALOG without hold arrives or 1.5 s pass, so
+//! it maps at its dialog's size. With backdrop, a dim layer fills the window
+//! under the display's frames. The reply is `-ENOENT` if the window is neither
+//! queued nor shown.
+//!
 //! `WINDOW_MINIMIZE` (0x0607): u32 display. Android sends it when it moves the
 //! display's root task to the back, and the bridge minimizes the toplevel. The
 //! reply is `-ENOENT` if the window is not shown.
@@ -164,6 +177,7 @@ pub mod ty {
     pub const WINDOW_TOKEN: u16 = 0x060c;
     pub const WINDOW_KEEP_AWAKE: u16 = 0x060d;
     pub const WINDOW_ROTATION: u16 = 0x060e;
+    pub const WINDOW_DIALOG: u16 = 0x060f;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -220,8 +234,20 @@ pub struct WindowPolicy {
     pub immersive: bool,
 }
 
+/// WINDOW_DIALOG's body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowDialog {
+    pub window: u32,
+    pub parent: Option<u32>,
+    pub hold: bool,
+    pub backdrop: bool,
+    /// x, y, width, height in display pixels.
+    pub crop: Option<[u32; 4]>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
+    WindowDialog(WindowDialog),
     WindowRequest(WindowRequest),
     WindowRotation {
         window: u32,
@@ -306,6 +332,28 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             fullscreen: r.u32_in(0..=1, "fullscreen")? != 0,
             immersive: r.u32_in(0..=1, "immersive")? != 0,
         }),
+        ty::WINDOW_DIALOG => {
+            let window = r.u32()?;
+            let parent = Some(r.u32()?).filter(|&p| p != u32::MAX);
+            let flags = r.u32_in(0..=3, "dialog flags")?;
+            let (hold, backdrop) = (flags & 1 != 0, flags & 2 != 0);
+            let x = r.u32_in(0..=limits::MAX_DIM, "x")?;
+            let y = r.u32_in(0..=limits::MAX_DIM, "y")?;
+            let width = r.u32_in(0..=limits::MAX_DIM - x, "width")?;
+            let height = r.u32_in(0..=limits::MAX_DIM - y, "height")?;
+            let crop = match (width, height) {
+                (0, 0) => None,
+                (0, _) | (_, 0) => return Err(DecodeError::Invalid("dialog size")),
+                _ => Some([x, y, width, height]),
+            };
+            Request::WindowDialog(WindowDialog {
+                window,
+                parent,
+                hold,
+                backdrop,
+                crop,
+            })
+        }
         ty::WINDOW_ROTATION => Request::WindowRotation {
             window: r.u32()?,
             rotation: r.u32_in(0..=3, "rotation")?,
@@ -396,6 +444,17 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
                 .u32(p.orientation)
                 .u32(u32::from(p.fullscreen))
                 .u32(u32::from(p.immersive));
+        }
+        Request::WindowDialog(d) => {
+            w = Writer::message(ty::WINDOW_DIALOG, tag);
+            let [x, y, width, height] = d.crop.unwrap_or_default();
+            w.u32(d.window)
+                .u32(d.parent.unwrap_or(u32::MAX))
+                .u32(u32::from(d.hold) | u32::from(d.backdrop) << 1)
+                .u32(x)
+                .u32(y)
+                .u32(width)
+                .u32(height);
         }
         Request::WindowRotation { window, rotation } => {
             w = Writer::message(ty::WINDOW_ROTATION, tag);
@@ -537,6 +596,20 @@ mod tests {
                 window: 0,
                 rotation: 3,
             },
+            Request::WindowDialog(WindowDialog {
+                window: 4,
+                parent: Some(2),
+                hold: false,
+                backdrop: false,
+                crop: Some([352, 204, 576, 391]),
+            }),
+            Request::WindowDialog(WindowDialog {
+                window: 4,
+                parent: None,
+                hold: true,
+                backdrop: true,
+                crop: None,
+            }),
         ] {
             assert_eq!(roundtrip(&encode(1, &req)), Ok(req));
         }
@@ -565,6 +638,16 @@ mod tests {
             rotation: 4,
         };
         assert!(roundtrip(&encode(1, &turn)).is_err());
+        for crop in [[0, 0, 0, 10], [16000, 0, 1000, 10]] {
+            let dialog = Request::WindowDialog(WindowDialog {
+                window: 4,
+                parent: None,
+                hold: false,
+                backdrop: false,
+                crop: Some(crop),
+            });
+            assert!(roundtrip(&encode(1, &dialog)).is_err());
+        }
         assert_eq!(decode(0x06ff, &[]), Err(DecodeError::UnknownType(0x06ff)));
     }
 

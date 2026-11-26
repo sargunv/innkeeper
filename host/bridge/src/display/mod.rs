@@ -157,6 +157,7 @@ impl DisplayService {
                 },
                 color: 0,
                 icon: None,
+                dialog: None,
             },
         )
     }

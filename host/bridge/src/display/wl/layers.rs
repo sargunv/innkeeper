@@ -19,7 +19,7 @@ use wayland_protocols::wp::color_representation::v1::client::{
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
 use super::frames::{Action, Frames};
-use super::{State, Unit, pixel_ratio, visibility};
+use super::{State, Unit, pixel_ratio, shown_crop, visibility};
 use crate::display::proto::Layer;
 
 /// wp_color_representation_manager_v1, which tells the compositor how to
@@ -304,8 +304,11 @@ impl State {
         let Some(ratio) = pixel_ratio(w) else {
             return;
         };
+        // A dialog window shows its display from the crop's origin.
+        let [ox, oy] = shown_crop(w).map_or([0, 0], |[x, y, _, _]| [x as i32, y as i32]);
         for sub in &w.layers {
-            let [x, y, width, height] = logical(sub.layer.rect, ratio);
+            let [x, y, width, height] = sub.layer.rect;
+            let [x, y, width, height] = logical([x - ox, y - oy, width, height], ratio);
             sub.subsurface.set_position(x, y);
             sub.viewport.set_destination(width, height);
             sub.surface.commit();

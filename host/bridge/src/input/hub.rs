@@ -58,6 +58,7 @@ pub struct PendingWindow {
     pub request: WindowRequest,
     pub color: u32,
     pub icon: Option<crate::ipc::blob::Image>,
+    pub dialog: Option<super::proto::WindowDialog>,
 }
 
 #[derive(Default)]
@@ -134,6 +135,7 @@ impl Hub {
                 request: r,
                 color: 0,
                 icon: None,
+                dialog: None,
             },
             now,
         ));
@@ -217,6 +219,21 @@ impl Hub {
         s.displays[conn]
             .send(Cmd::Rotation(window, rotation))
             .map_err(|_| -EIO)
+    }
+
+    /// Applies WINDOW_DIALOG to a shown window, or keeps it for a queued one.
+    pub fn window_dialog(&self, d: super::proto::WindowDialog) -> Result<(), i32> {
+        let mut s = self.state.lock().unwrap();
+        if let Some((pending, _)) = s
+            .queued
+            .iter_mut()
+            .find(|(p, _)| p.request.window == d.window)
+        {
+            pending.dialog = Some(d);
+            return Ok(());
+        }
+        let (conn, _) = s.shown.get(&d.window).ok_or(-ENOENT)?;
+        s.displays[conn].send(Cmd::Dialog(d)).map_err(|_| -EIO)
     }
 
     pub fn keep_awake(&self, window: u32, requested: bool) -> Result<(), i32> {

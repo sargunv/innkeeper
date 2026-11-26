@@ -308,7 +308,7 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                         } else {
                             st.seat.set_cursor(Shape::Default);
                         }
-                        let (x, y) = st.to_display(id, surface_x, surface_y);
+                        let (x, y) = st.to_display_point(id, surface_x, surface_y);
                         st.hub.input(&format!("pointer_enter {x:.2} {y:.2} {id}"));
                         st.restore_cursor(id);
                         st.update_capture();
@@ -341,7 +341,7 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                 surface_y,
             } => match st.seat.pointer_focus {
                 Some((id, false)) if !st.seat.capture.state.active => {
-                    let (x, y) = st.to_display(id, surface_x, surface_y);
+                    let (x, y) = st.to_display_point(id, surface_x, surface_y);
                     st.hub
                         .input(&format!("pointer_motion {time} {x:.2} {y:.2}"));
                 }
@@ -614,7 +614,7 @@ impl Dispatch2<wl_touch::WlTouch, State> for Tch {
                     Some((w, false)) => {
                         st.frame_pointer_left(w);
                         st.seat.touch_focus.insert(id, w);
-                        let (x, y) = st.to_display(w, x, y);
+                        let (x, y) = st.to_display_point(w, x, y);
                         st.hub
                             .input(&format!("touch_down {time} {id} {x:.2} {y:.2} {w}"));
                     }
@@ -649,7 +649,7 @@ impl Dispatch2<wl_touch::WlTouch, State> for Tch {
                     );
                 }
                 if let Some(&w) = st.seat.touch_focus.get(&id) {
-                    let (x, y) = st.to_display(w, x, y);
+                    let (x, y) = st.to_display_point(w, x, y);
                     st.hub
                         .input(&format!("touch_motion {time} {id} {x:.2} {y:.2}"));
                 }

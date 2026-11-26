@@ -63,6 +63,7 @@ use wayland_protocols::xdg::toplevel_icon::v1::client::{
 pub(crate) mod appearance;
 pub(crate) mod cursor;
 mod data_device;
+mod dialog;
 mod foreign;
 mod formats;
 mod frames;
@@ -111,6 +112,7 @@ pub enum Cmd {
     WindowPolicy(WindowPolicy),
     /// WINDOW_ROTATION: window, quarter turns.
     Rotation(u32, u32),
+    Dialog(crate::input::proto::WindowDialog),
     KeepAwake {
         window: u32,
         requested: bool,
@@ -121,6 +123,9 @@ pub enum Cmd {
     },
     Quit,
 }
+
+/// How long a dialog's window waits for its crop (WINDOW_DIALOG).
+const DIALOG_HOLD: Duration = Duration::from_millis(1500);
 
 /// Default minimum logical window size.
 const MIN_W: u32 = 240;
@@ -181,6 +186,16 @@ struct Win {
     /// The display's layers, bottom to top, and how many show under the frame.
     layers: Vec<layers::Sub>,
     below: u32,
+    /// WINDOW_DIALOG: the rectangle of the display that the window shows, in
+    /// display pixels, and the content size to restore without it.
+    crop: Option<[u32; 4]>,
+    uncropped: (u32, u32),
+    min_size: (u32, u32),
+    /// WINDOW_DIALOG's hold: no frame shows until the dialog's crop arrives.
+    /// The newest frame waits here, owned, with its damage.
+    hold: Option<Instant>,
+    held: Option<(u32, [i32; 4])>,
+    backdrop: Option<dialog::Backdrop>,
 }
 
 pub(crate) struct State {
@@ -375,6 +390,122 @@ impl State {
         (x / rx, y / ry)
     }
 
+    /// Maps a surface-local position to the display's pixels, adding the
+    /// offset of the rectangle a dialog window shows.
+    pub(crate) fn to_display_point(&self, id: u32, x: f64, y: f64) -> (f64, f64) {
+        let (x, y) = self.to_display(id, x, y);
+        let (ox, oy) = self.crop_origin(id);
+        (x + ox, y + oy)
+    }
+
+    /// The inverse of [`State::to_display_point`].
+    pub(crate) fn display_point_to_surface(&self, id: u32, x: f64, y: f64) -> (f64, f64) {
+        let (ox, oy) = self.crop_origin(id);
+        self.display_to_surface(id, x - ox, y - oy)
+    }
+
+    fn crop_origin(&self, id: u32) -> (f64, f64) {
+        match self.windows.get(&id).and_then(shown_crop) {
+            Some([x, y, _, _]) => (f64::from(x), f64::from(y)),
+            None => (0.0, 0.0),
+        }
+    }
+
+    /// WINDOW_DIALOG: parents the window, and shows only `crop` of its display
+    /// at a fixed size. The display keeps its size, so the dialog keeps its
+    /// layout.
+    fn dialog(&mut self, d: crate::input::proto::WindowDialog) {
+        let parent = d
+            .parent
+            .filter(|&p| p != d.window)
+            .and_then(|p| self.windows.get(&p))
+            .map(|p| p.window.clone());
+        let Some(w) = self.windows.get_mut(&d.window) else {
+            return;
+        };
+        w.window.set_parent(parent.as_ref());
+        w.hold = d.hold.then(|| w.hold.unwrap_or_else(Instant::now));
+        let released = if w.hold.is_none() {
+            w.held.take()
+        } else {
+            None
+        };
+        // Trim the crop in the frame that will show first.
+        let frame = released
+            .map(|(b, _)| b)
+            .or(w.held.map(|(b, _)| b))
+            .or(w.shown);
+        let crop = d
+            .crop
+            .map(|c| match frame.and_then(|b| self.buffers.get(&b)) {
+                Some(b) => dialog::trim(&b.source, &b.spec, c),
+                None => c,
+            });
+        let backdrop = d.backdrop && w.backdrop.is_none();
+        if !d.backdrop
+            && let Some(b) = w.backdrop.take()
+        {
+            b.destroy();
+        }
+        // Without a viewport the buffer can't be cropped. A rotated display is
+        // phone mode's, which has no dialogs.
+        let crop = crop.filter(|_| w.viewport.is_some() && w.rotation == 0);
+        if backdrop {
+            let parent = w.window.wl_surface().clone();
+            let size = (w.width, w.height);
+            let b = dialog::Backdrop::new(self, &parent, size);
+            let w = self.windows.get_mut(&d.window).unwrap();
+            w.backdrop = b;
+        }
+        let w = self.windows.get_mut(&d.window).unwrap();
+        crate::info!(
+            "display: window {} dialog parent={:?} crop={crop:?} backdrop={}",
+            d.window,
+            d.parent,
+            w.backdrop.is_some()
+        );
+        if crop == w.crop {
+            w.window.commit();
+            if let Some((buffer, damage)) = released {
+                self.frame(d.window, buffer, damage);
+            }
+            return;
+        }
+        if w.crop.is_none() {
+            w.uncropped = (w.width, w.height);
+        }
+        w.crop = crop;
+        let (width, height) = match crop {
+            Some([_, _, cw, ch]) => {
+                let scale = f64::from(w.scale.get()) / 120.0;
+                let size = |v: u32| ((f64::from(v) / scale).round() as u32).max(1);
+                let size = (size(cw), size(ch));
+                w.window.set_min_size(Some(size));
+                w.window.set_max_size(Some(size));
+                size
+            }
+            None => {
+                w.window.set_max_size(None);
+                w.window.set_min_size(Some(w.min_size));
+                w.uncropped
+            }
+        };
+        w.width = width;
+        w.height = height;
+        w.windowed_size = (width, height);
+        if let Some(b) = &w.backdrop {
+            b.resize((width, height));
+        }
+        crop_source(w);
+        self.resize_content(d.window);
+        // An uncropped window resizes its display to the window again.
+        self.send_configure(d.window);
+        self.place_layers(d.window);
+        if let Some((buffer, damage)) = released {
+            self.frame(d.window, buffer, damage);
+        }
+    }
+
     /// The window's scale × 120.
     pub(crate) fn scale120(&self, id: u32) -> u32 {
         self.windows.get(&id).map_or(120, |w| w.scale.get())
@@ -396,6 +527,16 @@ impl State {
         };
         std::mem::swap(&mut w.width, &mut w.height);
         w.windowed_size = (w.width, w.height);
+        self.resize_content(id);
+        self.send_configure(id);
+    }
+
+    /// Gives the toplevel the window's content size, which the client chooses
+    /// while floating.
+    fn resize_content(&mut self, id: u32) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
         if let Some(f) = w.frame.as_mut().filter(|f| !f.is_hidden()) {
             f.resize(
                 NonZeroU32::new(w.width).unwrap(),
@@ -415,8 +556,10 @@ impl State {
         if let Some(v) = &w.viewport {
             v.set_destination(w.width as i32, w.height as i32);
         }
+        if let Some(b) = &w.backdrop {
+            b.resize((w.width, w.height));
+        }
         w.window.commit();
-        self.send_configure(id);
     }
 
     /// Shows the window's frames turned back by `rotation` quarter turns and
@@ -469,7 +612,8 @@ impl State {
                 w.window.unset_fullscreen();
             }
         }
-        if desired.shape != 0 && desired.shape != compositor.shape {
+        // A dialog keeps the size of what it shows.
+        if desired.shape != 0 && desired.shape != compositor.shape && w.crop.is_none() {
             self.swap_shape(id);
         }
     }
@@ -748,7 +892,7 @@ impl State {
         let Some(w) = self.windows.get(&id) else {
             return;
         };
-        if w.configured {
+        if w.configured && w.crop.is_none() {
             let scale = w.scale.get() as f64 / 120.0;
             self.hub
                 .input(&format!("window {} {} {scale:.3} {id}", w.width, w.height));
@@ -760,6 +904,7 @@ impl State {
             request: s,
             color,
             icon,
+            dialog,
         } = pending;
         use crate::ipc::wire::errno::*;
         if self.windows.contains_key(&s.window) {
@@ -773,7 +918,8 @@ impl State {
             .create_window(surface, WindowDecorations::ClientOnly, &qh);
         window.set_title(s.title.clone());
         window.set_app_id(s.app_id.clone());
-        window.set_min_size(Some((s.min_width.max(MIN_W), s.min_height.max(MIN_H))));
+        let min_size = (s.min_width.max(MIN_W), s.min_height.max(MIN_H));
+        window.set_min_size(Some(min_size));
         let viewport = self
             .viewporter
             .as_ref()
@@ -822,9 +968,18 @@ impl State {
                 token: (!s.token.is_empty()).then_some(s.token),
                 layers: Vec::new(),
                 below: 0,
+                crop: None,
+                uncropped: (width, height),
+                min_size,
+                hold: None,
+                held: None,
+                backdrop: None,
             },
         );
         self.window_appearance(s.window, color, icon);
+        if let Some(d) = dialog {
+            self.dialog(d);
+        }
         self.windows[&s.window].window.commit();
         0
     }
@@ -850,6 +1005,12 @@ impl State {
         let Some(mut w) = self.windows.remove(&id) else {
             return;
         };
+        if let Some((buffer, _)) = w.held.take() {
+            self.release(buffer, false);
+        }
+        if let Some(b) = w.backdrop.take() {
+            b.destroy();
+        }
         layers::destroy(std::mem::take(&mut w.layers));
         self.window_timing(id);
         if let Some(v) = &w.viewport {
@@ -941,6 +1102,15 @@ impl State {
 
     fn remove_buffer(&mut self, id: u32) {
         self.forget_layer_buffer(id);
+        let held = self
+            .windows
+            .values_mut()
+            .filter(|w| w.held.is_some_and(|(b, _)| b == id))
+            .map(|w| w.held.take())
+            .count();
+        for _ in 0..held {
+            self.release(id, true);
+        }
         if let Some(mut b) = self.buffers.remove(&id) {
             for _ in 0..b.frames.release() {
                 self.release(id, true);
@@ -953,6 +1123,26 @@ impl State {
 
     fn frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
         self.cursor_frame(id);
+        let ours = self.buffers.get(&buffer).is_some_and(|b| b.window == id);
+        if let Some(w) = self.windows.get_mut(&id)
+            && let Some(since) = w.hold
+        {
+            let old = if since.elapsed() < DIALOG_HOLD && ours {
+                // Keep only the newest frame until the hold ends.
+                w.held.replace((buffer, damage))
+            } else {
+                crate::warn!("display: window {id}: no dialog crop after {DIALOG_HOLD:?}");
+                w.hold = None;
+                w.held.take()
+            };
+            let holding = w.hold.is_some();
+            if let Some((old, _)) = old {
+                self.release(old, false);
+            }
+            if holding {
+                return;
+            }
+        }
         let configured = self
             .windows
             .get(&id)
@@ -1017,6 +1207,7 @@ impl State {
         let resized = w.shown_size != (bw, bh);
         w.shown = Some(buffer);
         w.shown_size = (bw, bh);
+        crop_source(w);
         if let Some(f) = w.frame.as_mut()
             && f.is_dirty()
             && !f.is_hidden()
@@ -1232,6 +1423,7 @@ impl State {
             }
             Cmd::WindowPolicy(p) => self.window_policy(p),
             Cmd::Rotation(id, rotation) => self.rotation(id, rotation),
+            Cmd::Dialog(d) => self.dialog(d),
             Cmd::KeepAwake { window, requested } => {
                 if let Some(w) = self.windows.get_mut(&window) {
                     w.inhibit.requested = requested;
@@ -1305,7 +1497,7 @@ impl WindowHandler for State {
                 f.update_state(c.state);
                 f.update_wm_capabilities(c.capabilities);
                 let (nw, nh) = match c.new_size {
-                    (Some(nw), Some(nh)) => f.subtract_borders(nw, nh),
+                    (Some(nw), Some(nh)) if w.crop.is_none() => f.subtract_borders(nw, nh),
                     _ => (Some(cw), Some(ch)),
                 };
                 let (nw, nh) = (nw.unwrap_or(NonZeroU32::MIN), nh.unwrap_or(NonZeroU32::MIN));
@@ -1341,6 +1533,9 @@ impl WindowHandler for State {
         };
         w.width = width;
         w.height = height;
+        if let Some(b) = &w.backdrop {
+            b.resize((width, height));
+        }
         let was_visible = w.visibility.visible;
         w.visibility.configure(
             c.state
@@ -1627,7 +1822,33 @@ pub(super) fn foreign_handles(window: u32) -> Option<String> {
 /// A frame's sides as shown, turned by `rotation` quarter turns.
 /// The shown frame's pixels per logical unit of the window, across and down.
 fn pixel_ratio(w: &Win) -> Option<(f64, f64)> {
-    pixels_per_unit((w.width, w.height), w.shown_size, w.rotation)
+    let shown = match shown_crop(w) {
+        Some([_, _, cw, ch]) => (cw, ch),
+        None => w.shown_size,
+    };
+    pixels_per_unit((w.width, w.height), shown, w.rotation)
+}
+
+/// Shows the window's crop of the attached frame, or all of it. A source
+/// rectangle outside the buffer is a protocol error, so a crop that doesn't
+/// fit shows the whole frame.
+fn crop_source(w: &Win) {
+    let Some(v) = &w.viewport else { return };
+    match shown_crop(w) {
+        Some([x, y, cw, ch]) => {
+            v.set_source(f64::from(x), f64::from(y), f64::from(cw), f64::from(ch))
+        }
+        None => v.set_source(-1.0, -1.0, -1.0, -1.0),
+    }
+}
+
+/// The window's crop, if the shown frame holds it.
+fn shown_crop(w: &Win) -> Option<[u32; 4]> {
+    w.crop.filter(|&c| fits(c, w.shown_size))
+}
+
+fn fits([x, y, w, h]: [u32; 4], (bw, bh): (u32, u32)) -> bool {
+    u64::from(x) + u64::from(w) <= u64::from(bw) && u64::from(y) + u64::from(h) <= u64::from(bh)
 }
 
 fn pixels_per_unit(logical: (u32, u32), shown: (u32, u32), rotation: u32) -> Option<(f64, f64)> {
@@ -1789,6 +2010,17 @@ mod tests {
         assert_eq!(turned((1080, 2400), 3), (2400, 1080));
         assert_eq!(buffer_transform(1), wl_output::Transform::_270);
         assert_eq!(buffer_transform(4), wl_output::Transform::Normal);
+    }
+
+    #[test]
+    fn a_crop_applies_only_inside_the_shown_frame() {
+        assert!(fits([352, 204, 576, 391], (1280, 800)));
+        assert!(fits([0, 0, 1280, 800], (1280, 800)));
+        // The display shrank, or the first frame hasn't arrived.
+        assert!(!fits([352, 204, 576, 391], (800, 600)));
+        assert!(!fits([1, 0, 1280, 800], (1280, 800)));
+        assert!(!fits([0, 0, 1, 1], (0, 0)));
+        assert!(!fits([u32::MAX, 0, 1, 1], (1280, 800)));
     }
 
     #[test]

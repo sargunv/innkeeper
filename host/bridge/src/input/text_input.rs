@@ -106,8 +106,9 @@ impl State {
             }
             Req::Cursor { x, y, w, h } => {
                 // Display pixels to surface-local (logical) coordinates.
-                let (x0, y0) = self.display_to_surface(id, f64::from(x), f64::from(y));
-                let (x1, y1) = self.display_to_surface(id, f64::from(x + w), f64::from(y + h));
+                let (x0, y0) = self.display_point_to_surface(id, f64::from(x), f64::from(y));
+                let (x1, y1) =
+                    self.display_point_to_surface(id, f64::from(x + w), f64::from(y + h));
                 let (x0, y0) = (x0.floor() as i32, y0.floor() as i32);
                 ti.set_cursor_rectangle(
                     x0,
