@@ -95,6 +95,8 @@ class Session : public device::BnCameraDeviceSession {
   std::shared_ptr<Buffer> buffer(const Pending::Out& o);
   bool fill(const device::Stream& s, Buffer& b, const Frame& f, int quality);
   void closePending(Pending& p);
+  // Moves an unwaited acquire fence into the buffer's release fence.
+  static void returnFence(Pending::Out& o, device::StreamBuffer* sb);
 
   std::shared_ptr<device::ICameraDeviceCallback> mCallback;
   HostCamera mHost;

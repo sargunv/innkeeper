@@ -294,6 +294,14 @@ void Session::closePending(Pending& p) {
   }
 }
 
+// ICameraDeviceSession requires an unwaited acquire fence back as the
+// buffer's release fence.
+void Session::returnFence(Pending::Out& o, StreamBuffer* sb) {
+  if (o.acquireFence < 0) return;
+  sb->releaseFence.fds.emplace_back(o.acquireFence);
+  o.acquireFence = -1;
+}
+
 void Session::work() {
   for (;;) {
     Pending p;
@@ -390,12 +398,14 @@ void Session::process(Pending& p) {
   r.result.metadata = captureResult(mSettings, ts);
   int quality = jpegQuality(mSettings);
   for (auto& o : p.outputs) {
-    bool ok = false;
+    bool ok = true;
     if (o.acquireFence >= 0) {
       pollfd pfd{o.acquireFence, POLLIN, 0};
       ok = poll(&pfd, 1, 1000) == 1;
-    } else {
-      ok = true;
+      if (ok) {
+        ::close(o.acquireFence);
+        o.acquireFence = -1;
+      }
     }
     std::shared_ptr<Buffer> b = ok ? buffer(o) : nullptr;
     Stream s;
@@ -408,6 +418,7 @@ void Session::process(Pending& p) {
     sb.streamId = o.streamId;
     sb.bufferId = o.bufferId;
     sb.status = ok ? BufferStatus::OK : BufferStatus::ERROR;
+    returnFence(o, &sb);
     if (!ok) {
       msgs.push_back(
         NotifyMsg::make<NotifyMsg::error>(ErrorMsg{
@@ -427,24 +438,28 @@ void Session::process(Pending& p) {
 }
 
 void Session::fail(Pending& p, bool device) {
-  closePending(p);
   ErrorMsg e{
     .frameNumber = device ? -1 : p.frameNumber,
     .errorStreamId = -1,
     .errorCode = device ? ErrorCode::ERROR_DEVICE : ErrorCode::ERROR_REQUEST
   };
   mCallback->notify({NotifyMsg::make<NotifyMsg::error>(e)});
-  if (device) return;
+  if (device) {
+    closePending(p);
+    return;
+  }
   CaptureResult r;
   r.frameNumber = p.frameNumber;
   r.inputBuffer.streamId = -1;
-  for (const auto& o : p.outputs) {
+  for (auto& o : p.outputs) {
     StreamBuffer sb;
     sb.streamId = o.streamId;
     sb.bufferId = o.bufferId;
     sb.status = BufferStatus::ERROR;
+    returnFence(o, &sb);
     r.outputBuffers.push_back(std::move(sb));
   }
+  closePending(p);
   std::vector<CaptureResult> rs;
   rs.push_back(std::move(r));
   mCallback->processCaptureResult(rs);
