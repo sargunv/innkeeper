@@ -75,15 +75,13 @@ class Session : public device::BnCameraDeviceSession {
   ) override;
 
  private:
-  // A request the worker owns: its settings and its buffers' fds.
+  // A request the worker owns: its settings and its buffers' acquire fences.
   struct Pending {
     int32_t frameNumber;
     std::vector<uint8_t> settings;
     struct Out {
       int32_t streamId;
       int64_t bufferId;
-      std::vector<int> fds;
-      std::vector<int32_t> ints;
       int acquireFence = -1;
     };
     std::vector<Out> outputs;

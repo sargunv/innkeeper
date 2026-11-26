@@ -256,8 +256,14 @@ ScopedAStatus Session::processCaptureRequest(
       Pending::Out o;
       o.streamId = b.streamId;
       o.bufferId = b.bufferId;
-      for (const auto& fd : b.buffer.fds) o.fds.push_back(dup(fd.get()));
-      o.ints = b.buffer.ints;
+      // cameraserver sends a buffer's handle only the first time, so the
+      // buffer is cached now, even if this request is flushed or its fence
+      // times out.
+      if (!b.buffer.fds.empty()) {
+        std::vector<int> fds;
+        for (const auto& fd : b.buffer.fds) fds.push_back(fd.get());
+        mBuffers[{b.streamId, b.bufferId}] = Buffer::import(fds, b.buffer.ints);
+      }
       if (!b.acquireFence.fds.empty())
         o.acquireFence = dup(b.acquireFence.fds[0].get());
       p.outputs.push_back(std::move(o));
@@ -287,9 +293,7 @@ ScopedAStatus Session::repeatingRequestEnd(
 
 void Session::closePending(Pending& p) {
   for (auto& o : p.outputs) {
-    for (int fd : o.fds) ::close(fd);
     if (o.acquireFence >= 0) ::close(o.acquireFence);
-    o.fds.clear();
     o.acquireFence = -1;
   }
 }
@@ -335,9 +339,7 @@ void Session::work() {
 
 std::shared_ptr<Buffer> Session::buffer(const Pending::Out& o) {
   std::lock_guard lock(mMutex);
-  auto key = std::make_pair(o.streamId, o.bufferId);
-  if (!o.fds.empty()) mBuffers[key] = Buffer::import(o.fds, o.ints);
-  auto it = mBuffers.find(key);
+  auto it = mBuffers.find({o.streamId, o.bufferId});
   return it == mBuffers.end() ? nullptr : it->second;
 }
 
