@@ -34,6 +34,8 @@ pub struct Camera {
     allow_portals: bool,
     session: OnceLock<Option<zbus::blocking::Connection>>,
     inner: Mutex<Inner>,
+    /// Held while the portal's dialog is up, so that only one shows.
+    asking: Mutex<()>,
     next_client: AtomicU64,
 }
 
@@ -58,6 +60,7 @@ impl Camera {
             allow_portals,
             session: OnceLock::new(),
             inner: Mutex::default(),
+            asking: Mutex::default(),
             next_client: AtomicU64::new(1),
         })
     }
@@ -73,6 +76,26 @@ impl Camera {
                     .ok()
             })
             .clone()
+    }
+
+    /// Asks the desktop through `ask`, unless the user has already answered.
+    /// A stream that starts while another one's dialog is up, as when an app
+    /// reopens the camera, waits for that answer instead of asking again.
+    fn consent(&self, ask: impl FnOnce() -> Result<(), (u8, String)>) -> Result<(), (u8, String)> {
+        let _one = self.asking.lock().unwrap();
+        {
+            let i = self.inner.lock().unwrap();
+            if i.granted {
+                return Ok(());
+            }
+            if i.denied {
+                return Err((status::DENIED, "the user denied the camera".into()));
+            }
+        }
+        crate::info!("camera: asking the desktop");
+        ask()?;
+        self.inner.lock().unwrap().granted = true;
+        Ok(())
     }
 
     fn current(&self, generation: u64) -> bool {
@@ -128,12 +151,8 @@ impl Camera {
         let Some(conn) = self.session() else {
             return self.end(generation, &events, status::UNAVAILABLE, "no session bus");
         };
-        if !self.inner.lock().unwrap().granted {
-            crate::info!("camera: asking the desktop");
-            if let Err((st, why)) = portal::access(&conn) {
-                return self.end(generation, &events, st, &why);
-            }
-            self.inner.lock().unwrap().granted = true;
+        if let Err((st, why)) = self.consent(|| portal::access(&conn)) {
+            return self.end(generation, &events, st, &why);
         }
         if !self.current(generation) {
             return;
@@ -354,6 +373,41 @@ mod tests {
             "the user denied the camera",
         );
         assert_eq!(start(&mut b).status, -EACCES);
+    }
+
+    #[test]
+    fn one_dialog_answers_every_stream_waiting_on_it() {
+        use std::sync::atomic::AtomicU32;
+        let cam = Camera::new(true);
+        let asked = Arc::new(AtomicU32::new(0));
+        let (answer, answered) = std::sync::mpsc::channel::<()>();
+        let ask = |cam: &Arc<Camera>, wait: Option<std::sync::mpsc::Receiver<()>>| {
+            let (cam, asked) = (cam.clone(), asked.clone());
+            std::thread::spawn(move || {
+                cam.consent(|| {
+                    asked.fetch_add(1, Ordering::SeqCst);
+                    if let Some(w) = wait {
+                        w.recv().unwrap()
+                    }
+                    Ok(())
+                })
+            })
+        };
+        let first = ask(&cam, Some(answered));
+        while asked.load(Ordering::SeqCst) == 0 {
+            std::thread::yield_now();
+        }
+        // The app reopens the camera while the first dialog is up.
+        let second = ask(&cam, None);
+        answer.send(()).unwrap();
+        assert!(first.join().unwrap().is_ok());
+        assert!(second.join().unwrap().is_ok());
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+        // After a denial, nothing asks again.
+        let cam = Camera::new(true);
+        cam.inner.lock().unwrap().denied = true;
+        let r = cam.consent(|| panic!("asked again"));
+        assert_eq!(r.map_err(|e| e.0), Err(status::DENIED));
     }
 
     #[test]
