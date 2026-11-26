@@ -124,11 +124,15 @@ ScopedAStatus Session::configureStreams(
     if (!mQueue.empty()) return error(kInternalError);
     // The host stream may restart below, and the worker reads mFrame.
     mCond.wait(lock, [&] { return !mBusy; });
+    // cameraserver keeps sending a retained stream's buffers by id alone,
+    // so only removed streams lose their imported buffers.
     mStreams.clear();
-    mBuffers.clear();
+    for (const Stream& s : config.streams) mStreams[s.id] = s;
+    std::erase_if(mBuffers, [&](const auto& e) {
+      return !mStreams.count(e.first.first);
+    });
     out->clear();
     for (const Stream& s : config.streams) {
-      mStreams[s.id] = s;
       if (s.width * s.height > largest.width * largest.height)
         largest = {s.width, s.height};
       HalStream h;
