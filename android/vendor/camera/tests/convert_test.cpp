@@ -220,6 +220,28 @@ void captureWithThumbnail() {
   CHECK(!thumb.empty() && thumb.size() <= kMaxThumbnailBytes);
 }
 
+void jpegFitsItsBound() {
+  // Noise at quality 100, and with a thumbnail, is over the raw NV12 size
+  // the HAL once advertised, and within the bound.
+  const uint32_t w = 1280, h = 720;
+  auto f = noise(w * h * 3 / 2);
+  JpegParams p;
+  p.quality = 100;
+  p.thumbWidth = 320;
+  p.thumbHeight = 240;
+  p.thumbQuality = 100;
+  auto j = captureJpeg({f.data(), w, h}, w, h, p);
+  CHECK(j.size() > w * h * 3 / 2 + 1024);
+  CHECK(j.size() <= jpegMaxBytes(w, h));
+  CHECK(encodeJpeg(f.data(), w, h, 100).size() <= jpegMaxBytes(w, h));
+  // Single-pixel stripes of black and white, the largest AC coefficients.
+  for (size_t i = 0; i < size_t(w) * h; i++) f[i] = i % 2 ? 255 : 0;
+  CHECK(encodeJpeg(f.data(), w, h, 100).size() <= jpegMaxBytes(w, h));
+  // Odd sizes round up to whole MCUs.
+  CHECK(jpegMaxBytes(17, 1) == jpegMaxBytes(32, 16));
+  CHECK(jpegMaxBytes(32, 16) > jpegMaxBytes(16, 16));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -230,5 +252,6 @@ int main(int argc, char** argv) {
   jpegStream(argc > 1 ? argv[1] : nullptr);
   exifSegmentBytes();
   captureWithThumbnail();
+  jpegFitsItsBound();
   return 0;
 }

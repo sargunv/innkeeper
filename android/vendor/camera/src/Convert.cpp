@@ -232,7 +232,35 @@ void block(Writer& w, Component& c, const float in[64]) {
   if (run) w.bits(c.ac->code[0], c.ac->size[0]);
 }
 
+// The most bits a block can take: the longest DC difference, then 63
+// coefficients of the longest AC code and its extra bits. Zero runs and an
+// EOB only shorten it, since a ZRL or an EOB code is no longer than the
+// coefficients it replaces.
+size_t blockBits(
+  const uint8_t* dcBits, const uint8_t* acBits, const uint8_t* acVals
+) {
+  const Huffman dc(dcBits, kDcVals), ac(acBits, acVals);
+  size_t d = 0, a = 0;
+  for (int c = 0; c < 12; c++) d = std::max<size_t>(d, dc.size[c] + c);
+  for (int s = 1; s < 256; s++) {
+    if (ac.size[s] && s != 0xf0) a = std::max<size_t>(a, ac.size[s] + (s & 15));
+  }
+  return d + 63 * a;
+}
+
 }  // namespace
+
+size_t jpegMaxBytes(uint32_t width, uint32_t height) {
+  const size_t mcus = size_t((width + 15) / 16) * ((height + 15) / 16);
+  const size_t bits =
+    mcus * (4 * blockBits(kDcLumaBits, kAcLumaBits, kAcLumaVals) +
+            2 * blockBits(kDcChromaBits, kAcChromaBits, kAcChromaVals));
+  // Stuffing follows each 0xff byte of the scan with a 0x00.
+  const size_t scan = 2 * ((bits + 7) / 8);
+  // SOI, the largest APP1, DQT, SOF0, the four DHTs, SOS and EOI.
+  const size_t dht = 4 * (4 + 1 + 16) + 2 * (12 + 162);
+  return 2 + (2 + 65535) + (4 + 2 * 65) + 19 + dht + 14 + 2 + scan;
+}
 
 std::vector<uint8_t> encodeJpeg(
   const uint8_t* i420, uint32_t width, uint32_t height, int quality,

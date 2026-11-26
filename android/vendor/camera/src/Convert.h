@@ -45,6 +45,11 @@ std::vector<uint8_t> encodeJpeg(
   const std::vector<uint8_t>& app1 = {}
 );
 
+// The most bytes encodeJpeg writes for a width x height image at any quality
+// and with any APP1 segment. 8-bit samples keep each coefficient within the
+// categories Annex K's tables code, so their longest codes bound the scan.
+size_t jpegMaxBytes(uint32_t width, uint32_t height);
+
 // The largest thumbnail an Exif APP1 segment holds: a segment's 65533 bytes
 // less exifSegment's 74.
 inline constexpr size_t kMaxThumbnailBytes = 65533 - 74;

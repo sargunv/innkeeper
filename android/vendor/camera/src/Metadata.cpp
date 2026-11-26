@@ -13,8 +13,6 @@ namespace innkeeper::camera {
 
 namespace {
 
-// A JPEG holds at most this many bytes, plus the CameraBlob trailer.
-constexpr int32_t kJpegMaxSize = 1280 * 720 * 3 / 2 + 1024;
 constexpr int64_t kFrameNs = 1'000'000'000LL / kMaxFps;
 
 // Width and height pairs, by area. 0x0 means no thumbnail.
@@ -188,7 +186,11 @@ Metadata characteristics() {
     {ANDROID_INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL}
   );
   m.set(ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES, kThumbnailSizes);
-  m.set<int32_t>(ANDROID_JPEG_MAX_SIZE, {kJpegMaxSize});
+  // The largest JPEG and the 8-byte CameraBlob trailer.
+  m.set<int32_t>(
+    ANDROID_JPEG_MAX_SIZE,
+    {int32_t(jpegMaxBytes(uint32_t(max.width), uint32_t(max.height)) + 8)}
+  );
   m.set<uint8_t>(ANDROID_LENS_FACING, {ANDROID_LENS_FACING_EXTERNAL});
   m.set<float>(ANDROID_LENS_INFO_AVAILABLE_FOCAL_LENGTHS, {3.0f});
   m.set<uint8_t>(
