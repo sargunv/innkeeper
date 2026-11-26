@@ -321,6 +321,28 @@ if (
       echo 'ok   AudioRecord detected the known marker from the private sink monitor'
       wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
       ;;
+    camera)
+      # A virtual camera on the private PipeWire stands in for a webcam. The
+      # fake Camera portal (desktop.py) allows it and hands the bridge that
+      # PipeWire.
+      gst-launch-1.0 -q videotestsrc pattern=white is-live=true \
+        ! video/x-raw,format=YUY2,width=640,height=480,framerate=30/1 \
+        ! pipewiresink mode=provide \
+        stream-properties='properties,media.class=Video/Source,media.role=Camera,node.name=innkeeper-e2e-camera' \
+        >"$T/camera-source.log" 2>&1 &
+      source=$!
+      trap 'kill "$source" 2>/dev/null || true; wait "$source" 2>/dev/null || true' EXIT
+      # shellcheck disable=SC2329 # invoked through until_ok
+      source_ready() { pw-cli ls Node | grep -q innkeeper-e2e-camera; }
+      until_ok source_ready
+      launch CameraProbe
+      # The camera HAL scales the white 640x480 YUY2 source into the probe's
+      # ImageReader, so its center reads white (BT.601 luma 235).
+      until_ok log_has InnkeeperCameraProbe 'frame [0-9]+ 640x480 luma=2(2[5-9]|3[0-9]|4[0-5])$'
+      file_has "$desktop_log" 'camera: access'
+      echo 'ok   an app with CAMERA sees the desktop camera through the Camera portal'
+      wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
+      ;;
     desktop)
       launch WideColorProbe
       # A host screenshot checks the pixels that the desktop displays, which can
@@ -439,10 +461,10 @@ if (
 fi
 
 groups=("$@")
-((${#groups[@]})) || groups=(boot input audio desktop lifecycle)
+((${#groups[@]})) || groups=(boot input audio desktop camera lifecycle)
 if [[ ${groups[*]} != ohos && ${groups[*]} != device ]]; then
   for group in "${groups[@]}"; do
-    case $group in boot | input | audio | desktop | lifecycle) ;; *)
+    case $group in boot | input | audio | desktop | camera | lifecycle) ;; *)
       echo "unknown e2e group: $group (ohos and device run alone)" >&2
       exit 2
       ;;

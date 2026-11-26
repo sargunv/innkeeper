@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import os
+import socket
 import sys
 
 import dbus
@@ -15,6 +16,8 @@ bus = dbus.SessionBus()
 PATH = "/org/freedesktop/portal/desktop"
 NOTIFY = "org.freedesktop.Notifications"
 SETTINGS = "org.freedesktop.portal.Settings"
+CAMERA = "org.freedesktop.portal.Camera"
+PROPERTIES = "org.freedesktop.DBus.Properties"
 selected = Path(sys.argv[1])
 selected.write_text("innkeeper-e2e-file")
 settings = {"org.freedesktop.appearance": {"color-scheme": dbus.UInt32(0)}}
@@ -101,6 +104,36 @@ class Portal(OpenUri):
   @dbus.service.signal(SETTINGS, signature="ssv")
   def SettingChanged(self, namespace, key, value):
     pass
+
+  # The Camera portal. The desktop has a camera, the user allows it, and the
+  # remote is this desktop's private PipeWire, where the runner adds a virtual
+  # camera.
+  @dbus.service.method(PROPERTIES, in_signature="ss", out_signature="v")
+  def Get(self, interface, name):
+    return self.GetAll(interface)[name]
+
+  @dbus.service.method(PROPERTIES, in_signature="s", out_signature="a{sv}")
+  def GetAll(self, interface):
+    if interface != CAMERA:
+      return dbus.Dictionary({}, signature="sv")
+    return dbus.Dictionary(
+      {"IsCameraPresent": dbus.Boolean(True), "version": dbus.UInt32(1)},
+      signature="sv",
+    )
+
+  @dbus.service.method(
+    CAMERA, in_signature="a{sv}", out_signature="o", sender_keyword="sender"
+  )
+  def AccessCamera(self, options, sender):
+    print("camera: access", flush=True)
+    return self.respond(options, sender, {})
+
+  @dbus.service.method(CAMERA, in_signature="a{sv}", out_signature="h")
+  def OpenPipeWireRemote(self, options):
+    print("camera: remote", flush=True)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+      s.connect(os.path.join(os.environ["XDG_RUNTIME_DIR"], "pipewire-0"))
+      return dbus.types.UnixFd(s.fileno())
 
   @dbus.service.method(
     "dev.sargunv.Innkeeper.TestPortal", in_signature="ssv", out_signature=""
