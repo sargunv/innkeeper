@@ -208,9 +208,13 @@ LINEAR.
 CPU-accessed, cursor and YUV buffers are sealed memfds that `/dev/udmabuf` turns
 into dma-bufs. These buffers are LINEAR and mappable, and RADV, ANV, lavapipe
 and linux-dmabuf can import them. Every plane's row pitch is a multiple of 256
-bytes, which RADV requires. An allocation with GPU usage fails if it can't get a
-dma-buf, because its consumers can't import a plain memfd. Window sinks are
-LINEAR and CPU-readable so that the bridge can snapshot hidden windows.
+bytes, which RADV requires. The allocator doesn't allocate through lavapipe, so
+lavapipe's render targets are these buffers too. It draws whole 4x4 pixel
+blocks, so each buffer has room for its last plane's rows up to the next
+multiple of 4. Otherwise the last block row of a 412x186 window would land past
+the buffer's end. An allocation with GPU usage fails if it can't get a dma-buf,
+because its consumers can't import a plain memfd. Window sinks are LINEAR and
+CPU-readable so that the bridge can snapshot hidden windows.
 
 `IMPLEMENTATION_DEFINED` buffers are NV12 for camera and video usage and RGBX
 otherwise, as in minigbm. An importer sees only the requested format, so Mesa

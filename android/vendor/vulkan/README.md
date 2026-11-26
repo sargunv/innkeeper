@@ -29,7 +29,8 @@ on top of Vulkan (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
 - **`-Dandroid-strict=false`.** Strict mode caps the drivers at Vulkan 1.1 and
   the CTS extension allowlist. Without it, all three drivers report Vulkan 1.4.
 - **Gralloc requirements.** The drivers need IMapper v5 metadata
-  (`PIXEL_FORMAT_FOURCC`, `PLANE_LAYOUTS`, `DATASPACE`) and the 256-byte pitch
+  (`PIXEL_FORMAT_FOURCC`, `PLANE_LAYOUTS`, `DATASPACE`), the 256-byte pitch and,
+  for lavapipe, room for rows up to a multiple of 4
   ([docs/display.md](../../../docs/display.md#buffers)). The driver allocates
   GPU render targets with a tiled layout. It uses dedicated allocations where
   the driver requires them, as RADV does. CPU-accessed buffers stay on udmabuf.

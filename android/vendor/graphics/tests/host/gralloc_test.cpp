@@ -96,6 +96,14 @@ static void testLayouts() {
   CHECK(computeLayout(fmt::RGBA_8888, 100, 10, 1, 0, &l));
   CHECK_EQ(l.stridePixels, 128u);  // 256-byte rows
 
+  // llvmpipe renders 4x4 blocks, so the rows up to the next multiple of 4 must
+  // fit. Page rounding alone leaves 1.4 of the 2 rows a 412x186 window needs.
+  CHECK(computeLayout(fmt::RGBA_8888, 412, 186, 1, 0, &l));
+  CHECK_EQ(l.planes[0].size, 1792ull * 186);
+  CHECK(l.layerSize >= 1792ull * 188);
+  CHECK(computeLayout(fmt::YCBCR_420_888, 641, 481, 1, 0, &l));
+  CHECK(l.layerSize >= l.planes[1].offset + uint64_t(l.planes[1].stride) * 244);
+
   CHECK(computeLayout(fmt::RGB_565, 100, 10, 1, 0, &l));
   CHECK_EQ(l.planes[0].stride, 256u);
   CHECK_EQ(l.stridePixels, 128u);

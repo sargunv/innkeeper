@@ -231,6 +231,15 @@ bool computeLayout(
     pl.size = uint64_t(pl.stride) * pl.heightInSamples;
     offset += pl.size;
   }
+  if (resolved != fmt::BLOB) {
+    // lavapipe's llvmpipe reads and writes whole 4x4 pixel blocks, and it
+    // sizes an imported image as if its height were a multiple of 4. The last
+    // block row of a 412x186 render target would otherwise run past the
+    // buffer into the next mapping.
+    const PlaneLayout& last = l.planes[fi->numPlanes - 1];
+    offset += uint64_t(last.stride) *
+              (alignUp(last.heightInSamples, 4) - last.heightInSamples);
+  }
   l.stridePixels = stride0 / (bpp0 ? bpp0 : 1);
   l.layerSize = alignUp(offset, kPageSize);
   l.pixelBytes = l.layerSize * layerCount;
