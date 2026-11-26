@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+struct lxb_packet;
+
 namespace innkeeper::camera {
 
 // The desktop's camera, through the Camera portal. False when the bridge is
@@ -44,6 +46,8 @@ class HostCamera {
 
  private:
   void readEvents();
+  // Applies a STATUS or FRAME event under mMutex. Returns whether it was one.
+  bool apply(const lxb_packet& p);
   bool copySlot(uint32_t slot, Frame* out);
 
   int mSock = -1;

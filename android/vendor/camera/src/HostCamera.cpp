@@ -3,8 +3,10 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 
+#include <poll.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -32,6 +34,32 @@ uint64_t u64(const uint8_t* p) {
 
 size_t nv12Size(uint32_t w, uint32_t h) {
   return size_t(w) * h + 2 * size_t((w + 1) / 2) * ((h + 1) / 2);
+}
+
+// lxb_call, keeping the events that arrive before the reply in `events`.
+int call(
+  int sock, const lxb_msg& req, lxb_packet* reply,
+  std::vector<lxb_packet>* events
+) {
+  reply->nfds = 0;
+  if (int r = lxb_send(sock, &req, -1)) return r;
+  const uint32_t tag = lxb_u32(req.b + 4);
+  auto deadline = std::chrono::steady_clock::now() +
+                  std::chrono::milliseconds(LXB_REPLY_TIMEOUT_MS);
+  for (;;) {
+    auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+      deadline - std::chrono::steady_clock::now()
+    );
+    pollfd pfd{sock, POLLIN, 0};
+    int pr = left.count() > 0 ? poll(&pfd, 1, int(left.count())) : 0;
+    if (pr < 0 && errno == EINTR) continue;
+    if (pr < 0) return -errno;
+    if (pr == 0) return -ETIMEDOUT;
+    if (int r = lxb_recv(sock, reply)) return r;
+    if (reply->type == LXB_REPLY && reply->tag == tag) return 0;
+    lxb_close_fds(reply);
+    if (reply->type != LXB_REPLY) events->push_back(*reply);
+  }
 }
 
 }  // namespace
@@ -66,7 +94,10 @@ int HostCamera::start(uint32_t width, uint32_t height) {
   lxb_put_u16(&m, uint16_t(height));
   lxb_put_u32(&m, 0);
   struct lxb_packet r;
-  int err = lxb_call(s, &m, &r);
+  // The bridge's stream thread may report, for example a denial, before
+  // the bridge replies.
+  std::vector<lxb_packet> early;
+  int err = call(s, m, &r, &early);
   if (err != 0) {
     close(s);
     return err;
@@ -104,6 +135,7 @@ int HostCamera::start(uint32_t width, uint32_t height) {
     mState = State::Starting;
     mLatest = 0;
     mStopped = false;
+    for (const lxb_packet& e : early) apply(e);
   }
   mReader = std::thread([this] { readEvents(); });
   return 0;
@@ -144,24 +176,7 @@ void HostCamera::readEvents() {
       mCond.notify_all();
       return;
     }
-    if (p.type == kStatus && p.len >= 1) {
-      uint8_t st = p.body[0];
-      mState = st == kRunning             ? State::Running
-               : st == kDenied            ? State::Denied
-               : mState == State::Running ? State::Lost
-                                          : State::Ended;
-      LOGI("host camera status %u", st);
-    } else if (p.type == kFrame && p.len >= 16) {
-      uint32_t slot = lxb_u32(p.body);
-      uint64_t n = u64(p.body + 8);
-      if (slot < mSlots && n > mLatest) {
-        mLatestSlot = slot;
-        mLatest = n;
-      }
-    } else {
-      continue;
-    }
-    mCond.notify_all();
+    if (apply(p)) mCond.notify_all();
   }
   std::lock_guard lock(mMutex);
   if (mState == State::Starting) mState = State::Ended;
@@ -169,6 +184,28 @@ void HostCamera::readEvents() {
   // A closed connection holds no stream either.
   mStopped = true;
   mCond.notify_all();
+}
+
+bool HostCamera::apply(const lxb_packet& p) {
+  if (p.type == kStatus && p.len >= 1) {
+    uint8_t st = p.body[0];
+    mState = st == kRunning             ? State::Running
+             : st == kDenied            ? State::Denied
+             : mState == State::Running ? State::Lost
+                                        : State::Ended;
+    LOGI("host camera status %u", st);
+    return true;
+  }
+  if (p.type == kFrame && p.len >= 16) {
+    uint32_t slot = lxb_u32(p.body);
+    uint64_t n = u64(p.body + 8);
+    if (slot < mSlots && n > mLatest) {
+      mLatestSlot = slot;
+      mLatest = n;
+    }
+    return true;
+  }
+  return false;
 }
 
 HostCamera::State HostCamera::state() {
