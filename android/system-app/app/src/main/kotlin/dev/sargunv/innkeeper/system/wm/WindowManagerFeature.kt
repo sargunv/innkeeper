@@ -428,8 +428,10 @@ class WindowManagerFeature(
           Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(r.component)
         else -> pm.getLaunchIntentForPackage(r.pkg) ?: return "error: no launcher activity"
       }
-    // NEW_TASK | RESET_TASK_IF_NEEDED, as a launcher uses, brings an existing task to the front.
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    // A desktop entry names the launcher activity, which keeps the launcher's bring-to-front.
+    val requested =
+      r.component != null && r.component != pm.getLaunchIntentForPackage(r.pkg)?.component
+    intent.addFlags(LaunchPolicy.launchFlags(requested))
     if (phone) {
       start(intent, DEFAULT_DISPLAY)
       if (phoneMapped) input.activateWindow(DEFAULT_DISPLAY, r.token) else requestPhoneWindow()
@@ -478,12 +480,21 @@ class WindowManagerFeature(
         r.token,
         if (r.newWindow) null else recent?.taskDescription,
       ) ?: return "error: no virtual display"
-    // An existing task, such as one started on display 0, moves over instead of starting anew.
     val existing = tasksOf(r.pkg).firstOrNull()
-    if (!r.newWindow && existing != null && r.uri == null && r.launchIntent == null) {
-      move(existing, w)
-    } else {
-      start(intent, w.id)
+    when (
+      LaunchPolicy.taskUse(
+        existing != null,
+        r.newWindow,
+        r.uri != null || r.launchIntent != null,
+        requested,
+      )
+    ) {
+      LaunchPolicy.TaskUse.START -> start(intent, w.id)
+      LaunchPolicy.TaskUse.MOVE -> move(checkNotNull(existing), w)
+      LaunchPolicy.TaskUse.MOVE_AND_START -> {
+        move(checkNotNull(existing), w)
+        start(intent, w.id)
+      }
     }
     return "launched display=${w.id} package=${r.pkg} size=${w.width}x${w.height} dpi=${w.dpi}"
   }
