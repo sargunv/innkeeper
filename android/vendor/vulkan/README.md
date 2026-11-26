@@ -28,6 +28,13 @@ on top of Vulkan (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
   0, and hardware level 1 for RADV and ANV or level 0 for lavapipe.
 - **`-Dandroid-strict=false`.** Strict mode caps the drivers at Vulkan 1.1 and
   the CTS extension allowlist. Without it, all three drivers report Vulkan 1.4.
+- **Video decode.** RADV and ANV implement Vulkan Video decode
+  (`VK_KHR_video_decode_h264`, `_h265`, `_av1` and `_vp9`) on GPUs with a
+  decoder. Mesa's default codec set, `all_free`, leaves out H.264 and H.265, so
+  the build enables `h264dec,h265dec,av1dec,vp9dec`. Encode stays off, and
+  lavapipe has no video queue. No Android component uses the decoders yet. They
+  are the decode API for a hardware Codec2 HAL
+  ([#20](https://github.com/sargunv/innkeeper/issues/20)).
 - **Gralloc requirements.** The drivers need IMapper v5 metadata
   (`PIXEL_FORMAT_FOURCC`, `PLANE_LAYOUTS`, `DATASPACE`) and the 256-byte pitch
   ([docs/display.md](../../../docs/display.md#buffers)). The driver allocates
@@ -55,19 +62,22 @@ on top of Vulkan (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
 
 Tests: `tests/run.sh` runs in `mise run test:bionic`. It runs `vkdriver_test`
 (loading, compute, udmabuf import, ANB images, deferred binds),
-`swapchain_test`, `ahb_vk_test`, `gles_test` and `gles_yuv_test`. The last
-checks YV12, NV12 and NV21 through EGLImage, as Skia imports them. The tests run
-on lavapipe and on the hardware driver that a normal launcher session selects.
-On hybrid systems, that is the selected GPU alone, because the broker permits
-only its node. Each invocation uses a fresh named Android session.
-`tests/ohos.sh` runs in `mise run test:bionic` too. It runs
-`ohos_swapchain_test` and `ohos_gles_test` in a fresh OpenHarmony profile on a
-nested desktop, on the GPU that the launcher selects, and it is skipped without
-a GPU. `ohos_gles_test` draws to an EGL window surface, and each frame must be
-in the consumer when `eglSwapBuffers` returns. It imports a buffer with
-`EGL_NATIVE_BUFFER_OHOS`, with our EGL loaded from a copy in `/data/local/tmp`.
-It also imports NV12, NV21, I420 and YV12 buffers in a video frame's layout and
-checks the RGB that a `samplerExternalOES` reads from them.
+`swapchain_test`, `ahb_vk_test`, `gles_test`, `gles_yuv_test` and, except on
+lavapipe, `vkvideo_test`. `gles_yuv_test` checks YV12, NV12 and NV21 through
+EGLImage, as Skia imports them. `vkvideo_test` writes an H.264 IDR frame of
+I_PCM macroblocks, which carry their samples uncoded, decodes it on the video
+queue and checks every sample. The tests run on lavapipe and on the hardware
+driver that a normal launcher session selects. On hybrid systems, that is the
+selected GPU alone, because the broker permits only its node. Each invocation
+uses a fresh named Android session. `tests/ohos.sh` runs in
+`mise run test:bionic` too. It runs `ohos_swapchain_test` and `ohos_gles_test`
+in a fresh OpenHarmony profile on a nested desktop, on the GPU that the launcher
+selects, and it is skipped without a GPU. `ohos_gles_test` draws to an EGL
+window surface, and each frame must be in the consumer when `eglSwapBuffers`
+returns. It imports a buffer with `EGL_NATIVE_BUFFER_OHOS`, with our EGL loaded
+from a copy in `/data/local/tmp`. It also imports NV12, NV21, I420 and YV12
+buffers in a video frame's layout and checks the RGB that a `samplerExternalOES`
+reads from them.
 
 ## OpenHarmony
 

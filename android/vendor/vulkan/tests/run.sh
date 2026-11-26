@@ -33,6 +33,10 @@ driver_tests() {
   bionic -- "$t/ahb_vk_test"
   bionic -- "$t/gles_test"
   bionic -- "$t/gles_yuv_test"
+  # Lavapipe has no video queue.
+  if [[ $d != lvp ]]; then
+    bionic -- "$t/vkvideo_test"
+  fi
 }
 
 # Ask a normal session, so the hardware test uses the node and HAL that the
