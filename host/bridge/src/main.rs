@@ -9,8 +9,9 @@
 //! [`innkeeper_core::paths`] dirs.
 //!
 //! - `INNKEEPER_TEST=1` marks a test session. It is isolated from the
-//!   desktop's clipboard, portals, OpenURI, notifications, MPRIS, AT-SPI and
-//!   location, and apps installed inside Android get no desktop entries.
+//!   desktop's clipboard, portals, OpenURI, notifications, MPRIS, AT-SPI,
+//!   location and camera, and apps installed inside Android get no desktop
+//!   entries.
 //! - `INNKEEPER_AUDIO_SINK`, `INNKEEPER_AUDIO_SOURCE` name the PipeWire sink
 //!   and capture source. The default is the desktop's.
 //! - `INNKEEPER_BRIDGE_DEBUG=1` turns on debug logging and the frame and
@@ -130,6 +131,16 @@ fn main() -> Result<()> {
         Ok(Box::new(
             innkeeper_bridge::hoststate::HostStateService::new(host_state.clone(), peer, events),
         ))
+    });
+    // The desktop's camera, asked for when an Android app opens it. A test
+    // session gets none.
+    let camera = innkeeper_bridge::camera::Camera::new(desktop);
+    services.register(service::CAMERA, "camera", move |peer, events| {
+        Ok(Box::new(innkeeper_bridge::camera::CameraService::new(
+            camera.clone(),
+            peer,
+            events,
+        )))
     });
     let store = innkeeper_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
     let session_store = store.clone();

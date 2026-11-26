@@ -5,6 +5,7 @@
 pub mod a11y;
 pub mod apps;
 pub mod audio;
+pub mod camera;
 pub mod display;
 pub mod documents;
 pub mod hoststate;

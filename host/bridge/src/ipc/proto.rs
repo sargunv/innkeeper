@@ -42,6 +42,9 @@ pub mod service {
     /// Health HAL and the system app (`hoststate::proto`, types
     /// 0x0800..=0x08ff, events 0x4800..=0x48ff).
     pub const HOSTSTATE: u32 = 8;
+    /// The desktop's camera through the Camera portal, for the camera HAL
+    /// (`camera::proto`, types 0x0900..=0x09ff, events 0x4900..=0x49ff).
+    pub const CAMERA: u32 = 9;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

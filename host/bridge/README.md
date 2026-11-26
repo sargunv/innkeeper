@@ -17,6 +17,7 @@ The launcher restarts it if it exits, and its clients reconnect.
 | 6   | input     | the system app only (WM, injector, IME) | the seat, its xkb keymap, gestures, tablets, cursor shape, `zwp_text_input_v3`                                                                                                       | `src/input/`     |
 | 7   | a11y      | the system app only (accessibility)     | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                                                                                                                  | `src/a11y/`      |
 | 8   | hoststate | the Health HAL, the system app          | UPower, the PowerProfileMonitor, NetworkMonitor and Location portals                                                                                                                 | `src/hoststate/` |
+| 9   | camera    | the camera HAL                          | the Camera portal and its PipeWire camera stream, with libpipewire loaded at run time                                                                                                | `src/camera/`    |
 
 ## Running
 
