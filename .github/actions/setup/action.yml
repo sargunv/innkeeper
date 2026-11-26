@@ -8,9 +8,24 @@ inputs:
 runs:
   using: composite
   steps:
+    # setup.sh installs from these packages and downloads only what's missing.
+    - uses: actions/cache/restore@v4
+      id: apt
+      with:
+        path: ~/.cache/innkeeper/apt
+        key:
+          apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.mode }}-${{
+          hashFiles('tools/ci/setup.sh') }}
+        restore-keys: |
+          apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.mode }}-
     - name: Runner packages and kernel setup
       shell: bash
       run: tools/ci/setup.sh '${{ inputs.mode }}'
+    - uses: actions/cache/save@v4
+      if: steps.apt.outputs.cache-hit != 'true'
+      with:
+        path: ~/.cache/innkeeper/apt
+        key: ${{ steps.apt.outputs.cache-primary-key }}
     - uses: jdx/mise-action@v5
       with:
         cache: true

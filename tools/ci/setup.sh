@@ -9,10 +9,19 @@ set -euo pipefail
   exit 1
 }
 mode=${1:?build or runtime}
+# The setup action caches the downloaded packages here, so a slow Ubuntu
+# mirror costs one run instead of every job's time limit.
+debs=$HOME/.cache/innkeeper/apt
+mkdir -p "$debs/partial"
+apt_install() {
+  sudo apt-get install -y --no-install-recommends \
+    -o Dir::Cache::Archives="$debs" "$@"
+  sudo chown -R "$USER" "$debs"
+}
 sudo apt-get update -qq
 case $mode in
   build)
-    sudo apt-get install -y --no-install-recommends \
+    apt_install \
       clang pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev \
       podman uidmap passt
     {
@@ -44,7 +53,7 @@ fi
 sudo chmod 666 /dev/udmabuf
 test -r /dev/udmabuf && test -w /dev/udmabuf
 [[ $mode == runtime ]] || exit 0
-sudo apt-get install -y --no-install-recommends \
+apt_install \
   podman uidmap passt flatpak fuse3 cpio dbus-user-session gnome-shell mutter \
   xdg-desktop-portal xdg-desktop-portal-gtk \
   at-spi2-core python3-pyatspi python3-dbus python3-gi wl-clipboard \
