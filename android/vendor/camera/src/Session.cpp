@@ -36,9 +36,6 @@ namespace {
 // android.hardware.camera.common.Status.
 constexpr int32_t kIllegalArgument = 1, kOperationNotSupported = 4,
                   kInternalError = 6;
-// How long the worker waits for the desktop's next frame before it repeats
-// the last one.
-constexpr int kFrameWaitMs = 200;
 
 ScopedAStatus error(int32_t status) {
   return ScopedAStatus::fromServiceSpecificError(status);
@@ -355,12 +352,19 @@ bool Session::fill(const Stream& s, Buffer& b, const Frame& f, int quality) {
 void Session::process(Pending& p) {
   if (!p.settings.empty()) mSettings = p.settings;
   if (mFrame.data.empty()) mFrame = black(kSizes[0].width, kSizes[0].height);
+  // A result is due one frame interval after the last. Until then the worker
+  // waits for the desktop's next frame, and then it repeats the last one, so
+  // a stream that hasn't started or has stalled keeps the characteristics'
+  // maximum rate.
+  constexpr int64_t kIntervalNs = 1'000'000'000LL / kMaxFps;
+  int64_t due = mLastNs + kIntervalNs - monotonicNs();
   Frame next;
-  if (mHost.next(mFrame.number, kFrameWaitMs, &next)) {
+  if (
+    mHost.next(mFrame.number, int(std::max<int64_t>(due, 0) / 1'000'000), &next)
+  ) {
     mFrame = std::move(next);
   } else {
-    // Repeated frames keep the characteristics' maximum rate.
-    int64_t due = mLastNs + 1'000'000'000LL / kMaxFps - monotonicNs();
+    due = mLastNs + kIntervalNs - monotonicNs();
     if (due > 0) {
       timespec d{time_t(due / 1'000'000'000), long(due % 1'000'000'000)};
       nanosleep(&d, nullptr);

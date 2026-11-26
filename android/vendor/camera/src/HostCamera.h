@@ -56,6 +56,8 @@ class HostCamera {
   State mState = State::Ended;
   uint32_t mLatestSlot = 0;
   uint64_t mLatest = 0;
+  // The bridge answered STOP, so it has released the stream.
+  bool mStopped = false;
 };
 
 }  // namespace innkeeper::camera

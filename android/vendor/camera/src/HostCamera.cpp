@@ -21,6 +21,7 @@ namespace {
 
 constexpr uint16_t kInfo = 0x0901, kStart = 0x0902, kStop = 0x0903;
 constexpr uint16_t kStatus = 0x4901, kFrame = 0x4902;
+constexpr uint32_t kStopTag = 2;
 constexpr uint8_t kRunning = 1, kDenied = 2;
 constexpr uint32_t kMagic = 0x4643584c;  // "LXCF"
 constexpr size_t kDataOffset = 4096, kSlotHeaders = 64;
@@ -102,6 +103,7 @@ int HostCamera::start(uint32_t width, uint32_t height) {
     std::lock_guard lock(mMutex);
     mState = State::Starting;
     mLatest = 0;
+    mStopped = false;
   }
   mReader = std::thread([this] { readEvents(); });
   return 0;
@@ -110,9 +112,16 @@ int HostCamera::start(uint32_t width, uint32_t height) {
 void HostCamera::stop() {
   if (mSock < 0) return;
   struct lxb_msg m;
-  lxb_msg_init(&m, kStop, 2);
-  lxb_send(mSock, &m, -1);
-  // The reader sees EOF and ends.
+  lxb_msg_init(&m, kStop, kStopTag);
+  if (lxb_send(mSock, &m, -1) == 0) {
+    // The bridge releases the stream before it answers, so a start() that
+    // follows doesn't find the old stream still holding the camera.
+    std::unique_lock lock(mMutex);
+    mCond.wait_for(lock, std::chrono::milliseconds(LXB_REPLY_TIMEOUT_MS), [&] {
+      return mStopped;
+    });
+  }
+  // The reader sees EOF and ends, if the reply didn't end it.
   shutdown(mSock, SHUT_RDWR);
   if (mReader.joinable()) mReader.join();
   close(mSock);
@@ -130,6 +139,11 @@ void HostCamera::readEvents() {
     if (lxb_recv(mSock, &p) != 0) break;
     lxb_close_fds(&p);
     std::lock_guard lock(mMutex);
+    if (p.type == LXB_REPLY && p.tag == kStopTag) {
+      mStopped = true;
+      mCond.notify_all();
+      return;
+    }
     if (p.type == kStatus && p.len >= 1) {
       uint8_t st = p.body[0];
       mState = st == kRunning             ? State::Running
@@ -152,6 +166,8 @@ void HostCamera::readEvents() {
   std::lock_guard lock(mMutex);
   if (mState == State::Starting) mState = State::Ended;
   if (mState == State::Running) mState = State::Lost;
+  // A closed connection holds no stream either.
+  mStopped = true;
   mCond.notify_all();
 }
 
