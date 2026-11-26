@@ -57,7 +57,8 @@ apt_install \
   podman uidmap passt flatpak fuse3 cpio dbus-user-session gnome-shell mutter \
   xdg-desktop-portal xdg-desktop-portal-gtk \
   at-spi2-core python3-pyatspi python3-dbus python3-gi wl-clipboard \
-  libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils
+  libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils \
+  gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-pipewire
 XDG_RUNTIME_DIR=/run/user/$(id -u)
 export XDG_RUNTIME_DIR
 sudo loginctl enable-linger "$USER"

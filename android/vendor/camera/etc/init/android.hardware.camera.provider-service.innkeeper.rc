@@ -1,0 +1,7 @@
+# The desktop's camera (android/vendor/camera). The audio group grants access
+# to the bridge's socket directory, /dev/socket/innkeeper, which is
+# root:audio.
+service vendor.camera-provider-innkeeper /vendor/bin/hw/android.hardware.camera.provider-service.innkeeper
+    class hal
+    user cameraserver
+    group audio camera drmrpc

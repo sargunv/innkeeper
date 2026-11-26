@@ -31,6 +31,7 @@ enum {
   LXB_SERVICE_AUDIO = 1,
   LXB_SERVICE_DISPLAY = 2,
   LXB_SERVICE_HOSTSTATE = 8,
+  LXB_SERVICE_CAMERA = 9,
 };
 
 // An outgoing message. lxb_msg_init writes the header, and the lxb_put_*

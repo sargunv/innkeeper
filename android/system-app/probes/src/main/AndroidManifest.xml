@@ -15,6 +15,7 @@
   <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <uses-permission android:name="android.permission.CAMERA" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
 
   <!-- This is an ordinary, non-game application. Android 17 suppresses density-driven
@@ -25,6 +26,7 @@
     android:label="@string/app_name">
 
     <activity android:name=".AudioCaptureProbe" android:exported="true" />
+    <activity android:name=".CameraProbe" android:exported="true" android:label="Camera probe" />
     <activity android:name=".WindowProbe" android:exported="true" android:label="Window probe" android:configChanges="density|screenSize|smallestScreenSize|orientation|screenLayout" />
     <activity android:name=".WideColorProbe" android:exported="true" android:label="Wide colour probe" />
     <activity android:name=".WideColorProbe$Hdr" android:exported="true" android:label="HDR probe" />

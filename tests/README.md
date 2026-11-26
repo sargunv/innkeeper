@@ -8,9 +8,9 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   tests and the tests of OpenHarmony's system app. It needs no Android session
   or APK corpus.
 - `mise run test:e2e -- [group...]` runs one fresh named session on an isolated
-  desktop. Without arguments it runs five groups: `boot` (host safety, HOME and
-  storage), `input`, `audio`, `desktop` (including sharing) and `lifecycle`.
-  Build first:
+  desktop. Without arguments it runs six groups: `boot` (host safety, HOME and
+  storage), `input`, `audio`, `desktop` (including sharing), `camera` (a virtual
+  camera through the fake Camera portal) and `lifecycle`. Build first:
 
   ```sh
   mise run build
