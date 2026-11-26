@@ -11,16 +11,18 @@ use sctk::dispatch2::Dispatch2;
 use wayland_client::backend::ObjectId;
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::{
-    wl_data_device, wl_data_device_manager, wl_data_offer, wl_data_source, wl_seat,
+    wl_callback, wl_data_device, wl_data_device_manager, wl_data_offer, wl_data_source, wl_display,
+    wl_seat,
 };
 use wayland_client::{Connection, Proxy, QueueHandle};
 
 use super::State;
 use crate::system::Shared;
-use crate::system::clipboard::{ClipboardHub, MARKER, Offered, receive_offer, serve};
+use crate::system::clipboard::{ClipboardHub, Offered, receive_offer, serve};
 
 pub(crate) struct Clipboard {
     hub: Arc<ClipboardHub>,
+    display: wl_display::WlDisplay,
     manager: wl_data_device_manager::WlDataDeviceManager,
     device: Option<wl_data_device::WlDataDevice>,
     offers: HashMap<ObjectId, wl_data_offer::WlDataOffer>,
@@ -32,6 +34,7 @@ pub(crate) struct Clipboard {
 
 impl Clipboard {
     pub(super) fn new(
+        conn: &Connection,
         globals: &GlobalList,
         qh: &QueueHandle<State>,
         shared: &Shared,
@@ -60,6 +63,7 @@ impl Clipboard {
             .map_err(|e| anyhow::anyhow!("clipboard channel: {e}"))?;
         Ok(Some(Self {
             hub,
+            display: conn.display(),
             manager,
             device: None,
             offers: HashMap::new(),
@@ -91,6 +95,9 @@ impl Clipboard {
             source.offer(mime.clone());
         }
         device.set_selection(Some(&source), serial);
+        // The compositor takes or refuses the source while it handles
+        // set_selection, so a cancel before this sync's done is a refusal.
+        self.display.sync(qh, Sent(self.queue.generation()));
         if let Some((old, _)) = self.source.replace((source, offered)) {
             old.destroy();
         }
@@ -105,15 +112,11 @@ impl Clipboard {
             self.types.remove(&id);
             old.destroy();
         }
-        let types = offer
-            .as_ref()
-            .and_then(|o| self.types.get(&o.id()))
-            .cloned()
-            .unwrap_or_default();
-        if !self.queue.selection(types.iter().any(|t| t == MARKER)) {
+        if !self.queue.selection() {
             return;
         }
         if let Some(offer) = offer {
+            let types = self.types.get(&offer.id()).cloned().unwrap_or_default();
             // Selection events are delivered on keyboard enter. Consume them
             // after refocus even when nothing else changed in Android.
             receive_offer(&types, conn, self.hub.clone(), |mime, fd| {
@@ -131,8 +134,10 @@ impl Clipboard {
 /// cancels the source, and the copy waits for the next focus.
 struct Queue<T> {
     pending: Option<T>,
-    /// The copy last handed to the compositor, until its selection event.
-    sent: Option<T>,
+    /// The copy last handed to the compositor and its generation, until a
+    /// sync after it confirms that the compositor took it.
+    sent: Option<(u64, T)>,
+    generation: u64,
     serial: Option<u32>,
     enter_snapshot: bool,
     skip_snapshot: bool,
@@ -143,6 +148,7 @@ impl<T> Default for Queue<T> {
         Self {
             pending: None,
             sent: None,
+            generation: 0,
             serial: None,
             enter_snapshot: false,
             skip_snapshot: false,
@@ -171,28 +177,54 @@ impl<T: Clone> Queue<T> {
         // The compositor sends its previous selection just after keyboard
         // enter. A queued Android copy is newer than that focus snapshot.
         self.skip_snapshot |= self.enter_snapshot;
-        self.sent = Some(copy.clone());
+        self.generation += 1;
+        self.sent = Some((self.generation, copy.clone()));
         Some((serial, copy))
     }
 
-    /// A selection event, which is `ours` when it offers the bridge's marker.
-    /// Returns whether to read it into Android.
-    fn selection(&mut self, ours: bool) -> bool {
-        // A focus snapshot of the bridge's own earlier selection doesn't
-        // confirm a copy sent on that enter.
-        if ours && !self.enter_snapshot {
+    /// The generation of the copy last handed to the compositor.
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The sync after `generation`'s copy is done, so the compositor took it.
+    fn confirmed(&mut self, generation: u64) {
+        if self.sent.as_ref().is_some_and(|(g, _)| *g == generation) {
             self.sent = None;
         }
+    }
+
+    /// A selection event. Returns whether to read it into Android.
+    fn selection(&mut self) -> bool {
         self.enter_snapshot = false;
         !std::mem::take(&mut self.skip_snapshot)
     }
 
-    /// The compositor cancelled the current source. If it took the source,
-    /// another client's copy replaced it. If it never sent the source back as
-    /// the selection, it refused it.
+    /// The compositor cancelled the current source. Before its confirmation,
+    /// that's a refusal, and the copy waits for the next focus. After it,
+    /// another client's copy replaced it.
     fn cancelled(&mut self) {
-        if let Some(copy) = self.sent.take() {
+        if let Some((_, copy)) = self.sent.take() {
             self.pending.get_or_insert(copy);
+        }
+    }
+}
+
+/// A sync after `set_selection`, with the generation of the copy it sent.
+struct Sent(u64);
+impl Dispatch2<wl_callback::WlCallback, State> for Sent {
+    fn event(
+        &self,
+        st: &mut State,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event
+            && let Some(c) = st.clipboard.as_mut()
+        {
+            c.queue.confirmed(self.0);
         }
     }
 }
@@ -307,8 +339,9 @@ mod tests {
         assert_eq!(q.focus(Some(7)), Some((7, "a")));
         // The focus snapshot is older than the copy, so it stays out of
         // Android, and the copy's own selection follows.
-        assert!(!q.selection(false));
-        assert!(q.selection(true));
+        assert!(!q.selection());
+        q.confirmed(q.generation());
+        assert!(q.selection());
         assert_eq!(q.focus(None), None);
         assert_eq!(q.focus(Some(8)), None);
     }
@@ -317,36 +350,50 @@ mod tests {
     fn a_refused_copy_is_published_on_the_next_focus() {
         let mut q = Queue::default();
         q.focus(Some(7));
-        assert!(q.selection(false));
+        assert!(q.selection());
         // Focus moves to another window before the compositor reads the
-        // copy, so it cancels the source without a selection event.
+        // copy, so it cancels the source before the sync is done.
         assert_eq!(q.copy("a"), Some((7, "a")));
         q.focus(None);
         q.cancelled();
         assert_eq!(q.focus(Some(9)), Some((9, "a")));
-        assert!(!q.selection(false));
-        assert!(q.selection(true));
     }
 
     #[test]
     fn a_replaced_copy_stays_replaced() {
         let mut q = Queue::default();
         q.focus(Some(7));
-        q.selection(false);
+        q.selection();
         assert_eq!(q.copy("a"), Some((7, "a")));
-        assert!(q.selection(true));
+        q.confirmed(q.generation());
         q.focus(None);
         // Another client copied, and its selection is the snapshot to read.
         q.cancelled();
         assert_eq!(q.focus(Some(9)), None);
-        assert!(q.selection(false));
+        assert!(q.selection());
+    }
+
+    #[test]
+    fn focus_between_the_bridges_windows_sends_no_snapshot() {
+        let mut q = Queue::default();
+        q.focus(Some(7));
+        q.selection();
+        // Mutter sends no selection when focus stays with this client.
+        q.focus(None);
+        q.focus(Some(8));
+        assert_eq!(q.copy("a"), Some((8, "a")));
+        q.confirmed(q.generation());
+        // A desktop app's copy replaces it and must stay the selection.
+        q.focus(None);
+        q.cancelled();
+        assert_eq!(q.focus(Some(9)), None);
     }
 
     #[test]
     fn a_newer_copy_outranks_a_refused_one() {
         let mut q = Queue::default();
         q.focus(Some(7));
-        q.selection(false);
+        q.selection();
         q.copy("a");
         q.focus(None);
         q.copy("b");
@@ -355,20 +402,15 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_of_an_earlier_copy_confirms_nothing() {
+    fn an_older_copys_sync_confirms_nothing() {
         let mut q = Queue::default();
         q.focus(Some(7));
-        q.selection(false);
         q.copy("a");
-        q.selection(true);
-        q.focus(None);
+        let a = q.generation();
         q.copy("b");
-        assert_eq!(q.focus(Some(9)), Some((9, "b")));
-        // The snapshot is still the bridge's "a", and then focus moves away
-        // before the compositor reads "b".
-        assert!(!q.selection(true));
+        q.confirmed(a);
         q.focus(None);
         q.cancelled();
-        assert_eq!(q.focus(Some(11)), Some((11, "b")));
+        assert_eq!(q.focus(Some(9)), Some((9, "b")));
     }
 }
