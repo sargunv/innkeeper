@@ -2,9 +2,9 @@
 """Serve dev.sargunv.Innkeeper.TestDesktop on the disposable KWin desktop.
 
 tests/e2e/mutter.js serves the same interface in GNOME Shell. Input uses
-org_kde_kwin_fake_input, Visibility, Position, Geometry, Resize and Close use KWin scripts,
-Layout writes kxkbrc, and Screenshot uses org.kde.KWin.ScreenShot2. KWin grants this executable both
-restricted interfaces because of the desktop file that tests/nested.sh writes.
+org_kde_kwin_fake_input. Visibility, Position, Geometry, DialogGeometry, Resize and Close use KWin
+scripts, Layout writes kxkbrc, and Screenshot uses org.kde.KWin.ScreenShot2. KWin grants this
+executable both restricted interfaces because of the desktop file that tests/nested.sh writes.
 """
 
 import os
@@ -229,13 +229,31 @@ class TestDesktop(dbus.service.Object):
   )
   def Geometry(self, app_id, ok, err):
     """Reply with the frame of a window whose class contains app_id, or zeros."""
+    self.geometry(f'String(w.resourceClass).includes("{app_id}")', ok)
+
+  @dbus.service.method(
+    NAME,
+    in_signature="s",
+    out_signature="(iiii)",
+    async_callbacks=("ok", "err"),
+  )
+  def DialogGeometry(self, app_id, ok, err):
+    """Reply with the frame of a window whose class and whose parent's class
+    contain app_id, or zeros."""
+    self.geometry(
+      f'String(w.resourceClass).includes("{app_id}") && w.transientFor &&'
+      f' String(w.transientFor.resourceClass).includes("{app_id}")',
+      ok,
+    )
+
+  def geometry(self, condition, ok):
     self.scripts += 1
     name = f"innkeeper-test-desktop-{self.scripts}"
     self.geometries[name] = ok
     self.run_script(
       name,
       "for (const w of workspace.windowList()) {\n"
-      f'  if (!String(w.resourceClass).includes("{app_id}")) continue;\n'
+      f"  if (!({condition})) continue;\n"
       "  const g = w.frameGeometry;\n"
       f'  callDBus("{NAME}", "{PATH}", "{SCRIPT}", "Report", "{name}",'
       " Math.round(g.x), Math.round(g.y), Math.round(g.width), Math.round(g.height));\n"

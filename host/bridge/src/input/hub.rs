@@ -28,6 +28,10 @@ const OWN_WINDOWS: u32 = 1 << 31;
 /// of our windows has it.
 pub type FocusWatch = Box<dyn Fn(Option<u32>) + Send + Sync>;
 
+/// Receives a window and the display pixel at its top left corner, which
+/// isn't the display's origin while a dialog window shows part of it.
+pub type OriginWatch = Box<dyn Fn(u32, (u32, u32)) + Send + Sync>;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PointerPosition {
     pub position: (i32, i32),
@@ -39,6 +43,7 @@ pub struct Hub {
     state: Mutex<State>,
     clients: Subscribers,
     focus_watch: Mutex<Option<FocusWatch>>,
+    origin_watch: Mutex<Option<OriginWatch>>,
     window_watch: Mutex<Vec<Box<dyn Fn() + Send + Sync>>>,
     packages: Mutex<HashMap<u32, String>>,
     /// The seat's newest `repeat_info` line, for connections that come later.
@@ -58,6 +63,7 @@ pub struct PendingWindow {
     pub request: WindowRequest,
     pub color: u32,
     pub icon: Option<crate::ipc::blob::Image>,
+    pub dialog: Option<super::proto::WindowDialog>,
 }
 
 #[derive(Default)]
@@ -134,6 +140,7 @@ impl Hub {
                 request: r,
                 color: 0,
                 icon: None,
+                dialog: None,
             },
             now,
         ));
@@ -217,6 +224,21 @@ impl Hub {
         s.displays[conn]
             .send(Cmd::Rotation(window, rotation))
             .map_err(|_| -EIO)
+    }
+
+    /// Applies WINDOW_DIALOG to a shown window, or keeps it for a queued one.
+    pub fn window_dialog(&self, d: super::proto::WindowDialog) -> Result<(), i32> {
+        let mut s = self.state.lock().unwrap();
+        if let Some((pending, _)) = s
+            .queued
+            .iter_mut()
+            .find(|(p, _)| p.request.window == d.window)
+        {
+            pending.dialog = Some(d);
+            return Ok(());
+        }
+        let (conn, _) = s.shown.get(&d.window).ok_or(-ENOENT)?;
+        s.displays[conn].send(Cmd::Dialog(d)).map_err(|_| -EIO)
     }
 
     pub fn keep_awake(&self, window: u32, requested: bool) -> Result<(), i32> {
@@ -461,6 +483,18 @@ impl Hub {
     /// `watch` gets every keyboard focus change.
     pub fn watch_focus(&self, watch: FocusWatch) {
         *self.focus_watch.lock().unwrap() = Some(watch);
+    }
+
+    /// Called by the display when a window's origin changes.
+    pub fn window_origin(&self, window: u32, origin: (u32, u32)) {
+        if let Some(watch) = &*self.origin_watch.lock().unwrap() {
+            watch(window, origin);
+        }
+    }
+
+    /// `watch` gets every change of a window's origin.
+    pub fn watch_origin(&self, watch: OriginWatch) {
+        *self.origin_watch.lock().unwrap() = Some(watch);
     }
 }
 

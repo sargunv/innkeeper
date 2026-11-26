@@ -116,6 +116,8 @@ fn main() -> Result<()> {
     let a11y = innkeeper_bridge::a11y::Shared::new(desktop);
     let focus = a11y.clone();
     a11y_hub.watch_focus(Box::new(move |w| focus.keyboard_focus(w)));
+    let origin = a11y.clone();
+    a11y_hub.watch_origin(Box::new(move |w, o| origin.window_origin(w, o)));
     services.register(service::A11Y, "a11y", move |peer, events| {
         Ok(Box::new(innkeeper_bridge::a11y::A11yService::new(
             a11y.clone(),

@@ -40,6 +40,18 @@ object Tasks {
     android.app.TaskInfo::class.java.getField("topActivityInfo")
   }
 
+  private val stackTransparentField by lazy {
+    android.app.TaskInfo::class.java.getField("isActivityStackTransparent")
+  }
+
+  /** Every activity in the task is translucent, such as a dialog-themed one. */
+  fun isTranslucent(t: ActivityManager.RunningTaskInfo): Boolean =
+    try {
+      stackTransparentField.getBoolean(t)
+    } catch (e: ReflectiveOperationException) {
+      false
+    }
+
   fun topActivityInfo(t: ActivityManager.RunningTaskInfo): android.content.pm.ActivityInfo? =
     topActivityInfoField.get(t) as? android.content.pm.ActivityInfo
 

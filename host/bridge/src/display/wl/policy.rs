@@ -25,11 +25,14 @@ pub(super) struct WindowState {
     pub fullscreen: bool,
     pub shape: u32,
     pub constrained: bool,
+    /// A dialog window shows part of its display at a fixed size.
+    pub cropped: bool,
 }
 
 /// Reduces each app, user or compositor event to one desired window state. A
-/// shape request is applied once, and only while the window floats. A later
-/// compositor configure then wins, and old app metadata can't undo Ctrl+R.
+/// shape request is applied once, and only while the window floats and shows
+/// its whole display. A later compositor configure then wins, and old app
+/// metadata can't undo Ctrl+R.
 pub(super) fn desired_window_state(
     mut policy: Policy,
     event: Event,
@@ -48,16 +51,19 @@ pub(super) fn desired_window_state(
             fullscreen = !compositor.fullscreen;
             request = Some(fullscreen);
         }
-        Event::Rotate if !compositor.fullscreen && !compositor.constrained => {
+        Event::Rotate
+            if !compositor.fullscreen && !compositor.constrained && !compositor.cropped =>
+        {
             policy.pending_shape = 3 - compositor.shape;
         }
         _ => {}
     }
-    let shape = if fullscreen || compositor.fullscreen || compositor.constrained {
-        0
-    } else {
-        std::mem::take(&mut policy.pending_shape)
-    };
+    let shape =
+        if fullscreen || compositor.fullscreen || compositor.constrained || compositor.cropped {
+            0
+        } else {
+            std::mem::take(&mut policy.pending_shape)
+        };
     let desired = WindowState {
         fullscreen,
         shape,
@@ -79,6 +85,7 @@ mod tests {
             fullscreen,
             shape,
             constrained,
+            cropped: false,
         }
     }
 
@@ -93,6 +100,10 @@ mod tests {
         let full = window(true, 2, false);
         let max = window(false, 2, true);
         let tiled = window(false, 1, true);
+        let dialog = WindowState {
+            cropped: true,
+            ..land
+        };
         let cases: &[(&str, &[Step])] = &[
             (
                 "user fullscreen defers shape until exit",
@@ -130,6 +141,14 @@ mod tests {
                     (app(2), tiled, (false, 0, None)),
                     (Rotate, tiled, (false, 0, None)),
                     (Configure, port, (false, 2, None)),
+                ],
+            ),
+            (
+                "a dialog defers app orientation until it shows its whole display",
+                &[
+                    (app(1), dialog, (false, 0, None)),
+                    (Rotate, dialog, (false, 0, None)),
+                    (Configure, land, (false, 1, None)),
                 ],
             ),
             (

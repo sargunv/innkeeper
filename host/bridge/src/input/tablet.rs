@@ -198,7 +198,7 @@ impl Dispatch2<ZwpTabletToolV2, State> for T {
                     }
                     E::Up => "tablet_up".to_string(),
                     E::Motion { x, y } => {
-                        let (x, y) = st.to_display(w, x, y);
+                        let (x, y) = st.to_display_point(w, x, y);
                         format!("tablet_motion {x:.2} {y:.2}")
                     }
                     E::Pressure { pressure } => format!("tablet_pressure {pressure}"),

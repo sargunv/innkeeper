@@ -25,8 +25,8 @@
 use std::collections::{HashMap, HashSet};
 
 use accesskit::{
-    Action, ActionData, ActionRequest, CustomAction, Invalid, Live, Node, NodeId, Rect, Role,
-    TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
+    Action, ActionData, ActionRequest, Affine, CustomAction, Invalid, Live, Node, NodeId, Rect,
+    Role, TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
 };
 
 use super::proto::ActionEvent;
@@ -481,6 +481,11 @@ pub struct WindowTree {
     nodes: HashMap<NodeId, Entry>,
     root: Option<NodeId>,
     focus: Option<NodeId>,
+    /// The display pixel at the window's top left, and the newest snapshot's
+    /// display pixels per logical pixel. The root's transform moves the
+    /// nodes by the origin, since a dialog window shows part of its display.
+    origin: (u32, u32),
+    scale: f32,
 }
 
 impl WindowTree {
@@ -532,6 +537,38 @@ impl WindowTree {
             }
         }
         None
+    }
+
+    /// Moves the nodes so that `origin`, a display pixel, is the window's top
+    /// left. Returns the update for a tree AccessKit already has.
+    pub fn set_origin(&mut self, origin: (u32, u32)) -> Option<TreeUpdate> {
+        self.origin = origin;
+        let root = self.root?;
+        let node = self.place_root()?;
+        Some(TreeUpdate {
+            nodes: vec![(root, node)],
+            tree: None,
+            tree_id: TreeId::ROOT,
+            focus: self.focus.unwrap_or(root),
+        })
+    }
+
+    /// Gives the root the transform for the origin, and returns the root if
+    /// it changed.
+    fn place_root(&mut self) -> Option<Node> {
+        let root = self.nodes.get_mut(&self.root?)?;
+        let (x, y) = self.origin;
+        let s = f64::from(self.scale);
+        let wanted = ((x, y) != (0, 0) && s > 0.0)
+            .then(|| Affine::translate((-f64::from(x) / s, -f64::from(y) / s)));
+        if root.node.transform() == wanted.as_ref() {
+            return None;
+        }
+        match wanted {
+            Some(t) => root.node.set_transform(t),
+            None => root.node.clear_transform(),
+        }
+        Some(root.node.clone())
     }
 
     /// Applies a snapshot and returns the update to hand AccessKit. A partial
@@ -736,11 +773,17 @@ impl WindowTree {
             _ => root,
         };
         self.focus = Some(focus);
+        let mut nodes: Vec<(NodeId, Node)> = out
+            .into_iter()
+            .filter(|(id, _)| self.nodes.contains_key(id))
+            .collect();
+        self.scale = s.scale;
+        if let Some(node) = self.place_root() {
+            nodes.retain(|(id, _)| *id != root);
+            nodes.push((root, node));
+        }
         Ok(TreeUpdate {
-            nodes: out
-                .into_iter()
-                .filter(|(id, _)| self.nodes.contains_key(id))
-                .collect(),
+            nodes,
             tree: full.then(|| tree_info(root)),
             tree_id: TreeId::ROOT,
             focus,
@@ -1122,6 +1165,32 @@ mod tests {
         n.bounds = [30, 60, 90, 120];
         let b = convert(&n, 1.5, None).0.bounds().unwrap();
         assert_eq!((b.x0, b.y0, b.x1, b.y1), (20.0, 40.0, 60.0, 80.0));
+    }
+
+    #[test]
+    fn a_dialog_windows_nodes_start_at_its_crop() {
+        // A dialog window shows its display from 350,300, at 2 display pixels
+        // per logical pixel.
+        let mut button = raw(2);
+        button.bounds = [400, 360, 600, 440];
+        let mut s = full(vec![with_children(raw(1), &[2]), button], 0);
+        s.scale = 2.0;
+        let bounds = |c: &accesskit_consumer::Tree| {
+            let st = c.state();
+            let button = st.root().child_ids().next().unwrap();
+            let b = st.node_by_id(button).unwrap().bounding_box().unwrap();
+            (b.x0, b.y0, b.x1, b.y1)
+        };
+        let mut t = WindowTree::default();
+        assert!(t.set_origin((350, 300)).is_none());
+        let mut c = accesskit_consumer::Tree::new(t.apply(&s).unwrap(), true);
+        assert_eq!(bounds(&c), (25.0, 30.0, 125.0, 70.0));
+        // The crop moves, then the window shows its whole display.
+        c.update_and_process_changes(t.set_origin((300, 200)).unwrap(), &mut Nop);
+        assert_eq!(bounds(&c), (50.0, 80.0, 150.0, 120.0));
+        c.update_and_process_changes(t.set_origin((0, 0)).unwrap(), &mut Nop);
+        assert_eq!(bounds(&c), (200.0, 180.0, 300.0, 220.0));
+        assert!(t.set_origin((0, 0)).is_none());
     }
 
     fn full(nodes: Vec<RawNode>, focus: u64) -> Snapshot {
