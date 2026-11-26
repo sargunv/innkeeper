@@ -142,10 +142,17 @@ impl Camera {
             Ok(fd) => fd,
             Err((st, why)) => return self.end(generation, &events, st, &why),
         };
+        // A STOP while the portal answered cancels this stream.
+        if !self.current(generation) {
+            return;
+        }
         let me = self.clone();
         let ev = events.clone();
         let mut running = false;
+        // A stopped or replaced stream's callbacks publish nothing, because
+        // the connection may already have started another one.
         let capture = pw::Capture::start(remote, size.0, size.1, move |e| match e {
+            pw::Event::Streaming | pw::Event::Frame(_) if !me.current(generation) => {}
             pw::Event::Streaming if !running => {
                 running = true;
                 crate::info!("camera: streaming");

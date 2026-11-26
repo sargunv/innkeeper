@@ -70,8 +70,9 @@ pub struct Format {
     pub height: u32,
 }
 
-/// Largest frame the bridge accepts, in either dimension.
-pub const MAX_DIM: u32 = 4096;
+/// The largest frame the bridge accepts, which a frame ring slot holds.
+pub const MAX_WIDTH: u32 = 1920;
+pub const MAX_HEIGHT: u32 = 1080;
 
 struct Builder(Vec<u8>);
 
@@ -138,12 +139,12 @@ pub fn enum_format(width: u32, height: u32) -> Vec<u8> {
     let ids: Vec<&[u32]> = ids.iter().map(|v| &v[..]).collect();
     b.choice(CHOICE_ENUM, ty::ID, 4, &ids);
     b.prop(key::VIDEO_SIZE);
-    let (w, h) = (width.clamp(1, MAX_DIM), height.clamp(1, MAX_DIM));
+    let (w, h) = (width.clamp(1, MAX_WIDTH), height.clamp(1, MAX_HEIGHT));
     b.choice(
         CHOICE_RANGE,
         ty::RECTANGLE,
         8,
-        &[&[w, h], &[1, 1], &[MAX_DIM, MAX_DIM]],
+        &[&[w, h], &[1, 1], &[MAX_WIDTH, MAX_HEIGHT]],
     );
     b.prop(key::VIDEO_FRAMERATE);
     b.choice(
@@ -234,7 +235,7 @@ pub fn parse_format(pod: &[u8]) -> Option<Format> {
         return None;
     }
     let (width, height) = size?;
-    if width == 0 || height == 0 || width > MAX_DIM || height > MAX_DIM {
+    if width == 0 || height == 0 || width > MAX_WIDTH || height > MAX_HEIGHT {
         return None;
     }
     Some(Format {
@@ -288,7 +289,7 @@ mod tests {
         );
         // Out-of-range preferences are clamped.
         let f = parse_format(&enum_format(0, 99999)).unwrap();
-        assert_eq!((f.width, f.height), (1, MAX_DIM));
+        assert_eq!((f.width, f.height), (1, MAX_HEIGHT));
     }
 
     #[test]
@@ -301,6 +302,9 @@ mod tests {
         assert_eq!(parse_format(&fixed(7, 640, 480, MEDIA_SUBTYPE_RAW)), None);
         assert_eq!(parse_format(&fixed(4, 0, 480, MEDIA_SUBTYPE_RAW)), None);
         assert_eq!(parse_format(&fixed(4, 640, 8192, MEDIA_SUBTYPE_RAW)), None);
+        // Larger than a frame ring slot.
+        assert_eq!(parse_format(&fixed(4, 3840, 2160, MEDIA_SUBTYPE_RAW)), None);
+        assert!(parse_format(&fixed(4, 1920, 1080, MEDIA_SUBTYPE_RAW)).is_some());
     }
 
     #[test]

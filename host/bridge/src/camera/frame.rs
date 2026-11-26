@@ -145,13 +145,18 @@ impl Ring {
         fence(Ordering::Release);
         let ok = to_nv12(src, dst);
         let h = SLOT_HEADERS + slot as usize * 64;
-        if ok {
+        // A failed conversion may have overwritten part of the slot's old
+        // frame, so the slot then holds no frame.
+        let (w, hh, n) = if ok {
             self.frame += 1;
-            self.put_u32(h + 8, src.width);
-            self.put_u32(h + 12, src.height);
-            self.put_u64(h + 16, self.frame);
-            self.put_u64(h + 24, ts_ns);
-        }
+            (src.width, src.height, self.frame)
+        } else {
+            (0, 0, 0)
+        };
+        self.put_u32(h + 8, w);
+        self.put_u32(h + 12, hh);
+        self.put_u64(h + 16, n);
+        self.put_u64(h + 24, ts_ns);
         seq.store(s + 1, Ordering::Release);
         if !ok {
             return None;
@@ -494,5 +499,22 @@ mod tests {
         // Too large for a slot.
         let big = src(VideoFormat::Nv12, 4096, 4096, vec![]);
         assert_eq!(r.write(&big, 0), None);
+        // A short frame fails in slot 1, which then holds no frame.
+        let short = src(
+            VideoFormat::Nv12,
+            4,
+            2,
+            vec![Plane {
+                data: &NV12[..10],
+                stride: 4,
+            }],
+        );
+        assert_eq!(r.write(&short, 11), None);
+        let m = unsafe { std::slice::from_raw_parts(r.map.as_ptr(), DATA_OFFSET) };
+        let h1 = SLOT_HEADERS + 64;
+        assert_eq!(u64::from_le_bytes(m[h1..h1 + 8].try_into().unwrap()) % 2, 0);
+        assert_eq!(&m[h1 + 8..h1 + 24], &[0; 16]);
+        // The next good frame takes that slot.
+        assert_eq!(r.write(&s, 12), Some((1, 5)));
     }
 }
