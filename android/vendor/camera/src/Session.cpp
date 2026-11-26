@@ -352,10 +352,10 @@ bool Session::fill(const Stream& s, Buffer& b, const Frame& f, int quality) {
 void Session::process(Pending& p) {
   if (!p.settings.empty()) mSettings = p.settings;
   if (mFrame.data.empty()) mFrame = black(kSizes[0].width, kSizes[0].height);
-  // A result is due one frame interval after the last. Until then the worker
-  // waits for the desktop's next frame, and then it repeats the last one, so
-  // a stream that hasn't started or has stalled keeps the characteristics'
-  // maximum rate.
+  // A result is due one frame interval after the last, so results keep the
+  // characteristics' maximum rate. Until then the worker takes the desktop's
+  // newest frame, or repeats the last one if the stream hasn't started or has
+  // stalled. A faster desktop camera's extra frames are dropped.
   constexpr int64_t kIntervalNs = 1'000'000'000LL / kMaxFps;
   int64_t due = mLastNs + kIntervalNs - monotonicNs();
   Frame next;
@@ -363,12 +363,11 @@ void Session::process(Pending& p) {
     mHost.next(mFrame.number, int(std::max<int64_t>(due, 0) / 1'000'000), &next)
   ) {
     mFrame = std::move(next);
-  } else {
-    due = mLastNs + kIntervalNs - monotonicNs();
-    if (due > 0) {
-      timespec d{time_t(due / 1'000'000'000), long(due % 1'000'000'000)};
-      nanosleep(&d, nullptr);
-    }
+  }
+  due = mLastNs + kIntervalNs - monotonicNs();
+  if (due > 0) {
+    timespec d{time_t(due / 1'000'000'000), long(due % 1'000'000'000)};
+    nanosleep(&d, nullptr);
   }
   int64_t ts = monotonicNs();
   mLastNs = ts;
