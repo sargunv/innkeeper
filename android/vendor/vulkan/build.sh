@@ -189,7 +189,7 @@ build_hardware() {
     -Dzstd=disabled -Dexpat=disabled -Dxmlconfig=disabled \
     -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
     -Dperfetto=false -Dvulkan-layers= -Dtools= -Dbuild-tests=false \
-    -Dvideo-codecs=all_free -Dspirv-tools=disabled
+    -Dvideo-codecs=h264dec,h265dec,av1dec,vp9dec -Dspirv-tools=disabled
   meson compile -C "$b" -j "$JOBS"
   install_driver "$b/src/amd/vulkan/libvulkan_radeon.so" radv
   install_driver "$b/src/intel/vulkan/libvulkan_intel.so" anv
@@ -319,6 +319,7 @@ build_test() {
   "$cc" -O2 -Wall -o "$t/gles_test" "$here/tests/gles_test.c" -lEGL -lGLESv3
   "$cc" -O2 -Wall -o "$t/gles_yuv_test" "$here/tests/gles_yuv_test.c" -lEGL -lGLESv3 -lnativewindow
   "$cc" -O2 -Wall -o "$t/ahb_vk_test" "$here/tests/ahb_vk_test.c" -lvulkan -lnativewindow
+  "$cc" -O2 -Wall -o "$t/vkvideo_test" "$here/tests/vkvideo_test.c" -lvulkan
   "$cc" -O2 -Wall -o "$t/swapchain_test" "$here/tests/swapchain_test.c" -lvulkan -lmediandk -lnativewindow
   "$cc" -O2 -Wall -o "$t/fake_sf" "$here/tests/fake_sf.c" -lbinder_ndk -ldl
   # Buffers from the allocator's code, for vkdriver_test --anb-hal.
