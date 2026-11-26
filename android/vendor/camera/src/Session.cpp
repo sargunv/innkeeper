@@ -122,9 +122,11 @@ ScopedAStatus Session::configureStreams(
   if (!streamsSupported(config)) return error(kIllegalArgument);
   Size largest{0, 0};
   {
-    std::lock_guard lock(mMutex);
+    std::unique_lock lock(mMutex);
     if (mClosed) return error(kInternalError);
     if (!mQueue.empty()) return error(kInternalError);
+    // The host stream may restart below, and the worker reads mFrame.
+    mCond.wait(lock, [&] { return !mBusy; });
     mStreams.clear();
     mBuffers.clear();
     out->clear();
@@ -152,8 +154,20 @@ ScopedAStatus Session::configureStreams(
       );
     }
   }
-  if (mHost.state() == HostCamera::State::Ended) {
+  // The desktop captures at the largest stream's size, so a stream larger
+  // than the last request restarts it rather than upscaling its frames.
+  HostCamera::State st = mHost.state();
+  bool larger =
+    largest.width * largest.height > mHostSize.width * mHostSize.height;
+  if (
+    st == HostCamera::State::Ended ||
+    (larger &&
+     (st == HostCamera::State::Starting || st == HostCamera::State::Running))
+  ) {
+    // A new stream numbers its frames from 1 again.
+    mFrame.number = 0;
     int err = mHost.start(uint32_t(largest.width), uint32_t(largest.height));
+    if (!err) mHostSize = largest;
     if (err == -EACCES) {
       LOGW("the desktop denied the camera earlier in this session");
       return error(kOperationNotSupported);

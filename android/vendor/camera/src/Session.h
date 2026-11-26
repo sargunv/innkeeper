@@ -20,6 +20,7 @@
 
 #include "Buffers.h"
 #include "HostCamera.h"
+#include "Metadata.h"
 
 namespace innkeeper::camera {
 
@@ -110,6 +111,8 @@ class Session : public device::BnCameraDeviceSession {
   bool mDeviceError = false;
   std::thread mWorker;
   Frame mFrame;
+  // The size the host stream was last started at.
+  Size mHostSize{0, 0};
   int64_t mLastNs = 0;
 };
 
