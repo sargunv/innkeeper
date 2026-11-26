@@ -65,7 +65,7 @@
 //! window shows only that rectangle of its display, trimmed to what the frame
 //! draws inside a uniform translucent border, at that size. It doesn't resize
 //! or rescale the display. With hold, sent with a queued request, the window
-//! shows no frame until a WINDOW_DIALOG without hold arrives or 1.5 s pass, so
+//! shows no frame until a WINDOW_DIALOG without hold arrives or 3 s pass, so
 //! it maps at its dialog's size. With backdrop, a dim layer fills the window
 //! under the display's frames. The reply is `-ENOENT` if the window is neither
 //! queued nor shown.

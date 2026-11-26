@@ -28,6 +28,10 @@ const OWN_WINDOWS: u32 = 1 << 31;
 /// of our windows has it.
 pub type FocusWatch = Box<dyn Fn(Option<u32>) + Send + Sync>;
 
+/// Receives a window and the display pixel at its top left corner, which
+/// isn't the display's origin while a dialog window shows part of it.
+pub type OriginWatch = Box<dyn Fn(u32, (u32, u32)) + Send + Sync>;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PointerPosition {
     pub position: (i32, i32),
@@ -39,6 +43,7 @@ pub struct Hub {
     state: Mutex<State>,
     clients: Subscribers,
     focus_watch: Mutex<Option<FocusWatch>>,
+    origin_watch: Mutex<Option<OriginWatch>>,
     window_watch: Mutex<Vec<Box<dyn Fn() + Send + Sync>>>,
     packages: Mutex<HashMap<u32, String>>,
     /// The seat's newest `repeat_info` line, for connections that come later.
@@ -478,6 +483,18 @@ impl Hub {
     /// `watch` gets every keyboard focus change.
     pub fn watch_focus(&self, watch: FocusWatch) {
         *self.focus_watch.lock().unwrap() = Some(watch);
+    }
+
+    /// Called by the display when a window's origin changes.
+    pub fn window_origin(&self, window: u32, origin: (u32, u32)) {
+        if let Some(watch) = &*self.origin_watch.lock().unwrap() {
+            watch(window, origin);
+        }
+    }
+
+    /// `watch` gets every change of a window's origin.
+    pub fn watch_origin(&self, watch: OriginWatch) {
+        *self.origin_watch.lock().unwrap() = Some(watch);
     }
 }
 

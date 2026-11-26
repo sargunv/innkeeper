@@ -124,8 +124,10 @@ pub enum Cmd {
     Quit,
 }
 
-/// How long a dialog's window waits for its crop (WINDOW_DIALOG).
-const DIALOG_HOLD: Duration = Duration::from_millis(1500);
+/// How long a dialog's window waits for its task to draw (WINDOW_DIALOG). The
+/// window manager ends the hold once the task draws, so only a slow cold start
+/// reaches this.
+const DIALOG_HOLD: Duration = Duration::from_secs(3);
 
 /// Default minimum logical window size.
 const MIN_W: u32 = 240;
@@ -196,6 +198,8 @@ struct Win {
     hold: Option<Instant>,
     held: Option<(u32, [i32; 4])>,
     backdrop: Option<dialog::Backdrop>,
+    /// The shown crop's origin, as the a11y service last heard it.
+    origin: (u32, u32),
 }
 
 pub(crate) struct State {
@@ -320,7 +324,7 @@ impl Dispatch2<WpFractionalScaleV1, State> for ScaleOf {
             if let Some(f) = w.frame.as_mut() {
                 f.set_scaling_factor(w.scale.get() as f64 / 120.0);
             }
-            st.send_configure(self.0);
+            st.scale_changed(self.0);
         }
     }
 }
@@ -475,34 +479,51 @@ impl State {
             w.uncropped = (w.width, w.height);
         }
         w.crop = crop;
-        let (width, height) = match crop {
-            Some([_, _, cw, ch]) => {
-                let scale = f64::from(w.scale.get()) / 120.0;
-                let size = |v: u32| ((f64::from(v) / scale).round() as u32).max(1);
-                let size = (size(cw), size(ch));
-                w.window.set_min_size(Some(size));
-                w.window.set_max_size(Some(size));
-                size
-            }
-            None => {
-                w.window.set_max_size(None);
-                w.window.set_min_size(Some(w.min_size));
-                w.uncropped
-            }
-        };
-        w.width = width;
-        w.height = height;
-        w.windowed_size = (width, height);
-        if let Some(b) = &w.backdrop {
-            b.resize((width, height));
+        if crop.is_none() {
+            w.window.set_max_size(None);
+            w.window.set_min_size(Some(w.min_size));
+            (w.width, w.height) = w.uncropped;
+            w.windowed_size = w.uncropped;
         }
-        crop_source(w);
-        self.resize_content(d.window);
+        self.fit_crop(d.window);
         // An uncropped window resizes its display to the window again.
         self.send_configure(d.window);
-        self.place_layers(d.window);
+        if crop.is_none() {
+            // An orientation request that came while cropped applies now.
+            self.apply_window_policy(d.window, PolicyEvent::Configure);
+        }
         if let Some((buffer, damage)) = released {
             self.frame(d.window, buffer, damage);
+        }
+    }
+
+    /// Gives a cropped window the crop's size at the window's scale, and shows
+    /// the window's content at its size.
+    fn fit_crop(&mut self, id: u32) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if let Some([_, _, cw, ch]) = w.crop {
+            let scale = f64::from(w.scale.get()) / 120.0;
+            let size = |v: u32| ((f64::from(v) / scale).round() as u32).max(1);
+            let size = (size(cw), size(ch));
+            w.window.set_min_size(Some(size));
+            w.window.set_max_size(Some(size));
+            (w.width, w.height) = size;
+            w.windowed_size = size;
+        }
+        crop_source(w);
+        sync_origin(w, &self.hub, id);
+        self.resize_content(id);
+        self.place_layers(id);
+    }
+
+    /// Tells Android the window's new scale. A cropped window keeps its
+    /// display's size in logical units, and its crop shows at the new scale.
+    fn scale_changed(&mut self, id: u32) {
+        self.send_configure(id);
+        if self.windows.get(&id).is_some_and(|w| w.crop.is_some()) {
+            self.fit_crop(id);
         }
     }
 
@@ -601,6 +622,7 @@ impl State {
             fullscreen: w.fullscreen,
             shape: if w.width <= w.height { 1 } else { 2 },
             constrained: w.constrained,
+            cropped: w.crop.is_some(),
         };
         let (policy, desired, fullscreen_request) =
             desired_window_state(w.policy, event, compositor);
@@ -612,8 +634,7 @@ impl State {
                 w.window.unset_fullscreen();
             }
         }
-        // A dialog keeps the size of what it shows.
-        if desired.shape != 0 && desired.shape != compositor.shape && w.crop.is_none() {
+        if desired.shape != 0 && desired.shape != compositor.shape {
             self.swap_shape(id);
         }
     }
@@ -892,10 +913,15 @@ impl State {
         let Some(w) = self.windows.get(&id) else {
             return;
         };
-        if w.configured && w.crop.is_none() {
+        if w.configured {
+            // A cropped window's display keeps its size.
+            let (width, height) = match w.crop {
+                Some(_) => w.uncropped,
+                None => (w.width, w.height),
+            };
             let scale = w.scale.get() as f64 / 120.0;
             self.hub
-                .input(&format!("window {} {} {scale:.3} {id}", w.width, w.height));
+                .input(&format!("window {width} {height} {scale:.3} {id}"));
         }
     }
 
@@ -974,6 +1000,7 @@ impl State {
                 hold: None,
                 held: None,
                 backdrop: None,
+                origin: (0, 0),
             },
         );
         self.window_appearance(s.window, color, icon);
@@ -1010,6 +1037,9 @@ impl State {
         }
         if let Some(b) = w.backdrop.take() {
             b.destroy();
+        }
+        if w.origin != (0, 0) {
+            self.hub.window_origin(id, (0, 0));
         }
         layers::destroy(std::mem::take(&mut w.layers));
         self.window_timing(id);
@@ -1102,12 +1132,13 @@ impl State {
 
     fn remove_buffer(&mut self, id: u32) {
         self.forget_layer_buffer(id);
-        let held = self
-            .windows
-            .values_mut()
-            .filter(|w| w.held.is_some_and(|(b, _)| b == id))
-            .map(|w| w.held.take())
-            .count();
+        let mut held = 0;
+        for w in self.windows.values_mut() {
+            if w.held.is_some_and(|(b, _)| b == id) {
+                w.held = None;
+                held += 1;
+            }
+        }
         for _ in 0..held {
             self.release(id, true);
         }
@@ -1131,7 +1162,7 @@ impl State {
                 // Keep only the newest frame until the hold ends.
                 w.held.replace((buffer, damage))
             } else {
-                crate::warn!("display: window {id}: no dialog crop after {DIALOG_HOLD:?}");
+                crate::warn!("display: window {id}: its task didn't draw in {DIALOG_HOLD:?}");
                 w.hold = None;
                 w.held.take()
             };
@@ -1208,6 +1239,7 @@ impl State {
         w.shown = Some(buffer);
         w.shown_size = (bw, bh);
         crop_source(w);
+        sync_origin(w, &self.hub, id);
         if let Some(f) = w.frame.as_mut()
             && f.is_dirty()
             && !f.is_hidden()
@@ -1594,7 +1626,7 @@ impl CompositorHandler for State {
             f.set_scaling_factor(w.scale.get() as f64 / 120.0);
         }
         let id = w.id;
-        self.send_configure(id);
+        self.scale_changed(id);
     }
     fn transform_changed(
         &mut self,
@@ -1839,6 +1871,16 @@ fn crop_source(w: &Win) {
             v.set_source(f64::from(x), f64::from(y), f64::from(cw), f64::from(ch))
         }
         None => v.set_source(-1.0, -1.0, -1.0, -1.0),
+    }
+}
+
+/// Tells the a11y service where the shown crop starts, so a dialog's nodes
+/// have the window's coordinates.
+fn sync_origin(w: &mut Win, hub: &Hub, id: u32) {
+    let origin = shown_crop(w).map_or((0, 0), |[x, y, _, _]| (x, y));
+    if origin != w.origin {
+        w.origin = origin;
+        hub.window_origin(id, origin);
     }
 }
 

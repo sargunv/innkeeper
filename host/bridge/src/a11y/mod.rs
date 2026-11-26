@@ -57,6 +57,8 @@ pub struct Shared {
     windows: Mutex<HashMap<u32, Arc<Window>>>,
     /// The window with keyboard focus.
     focus: Mutex<Option<u32>>,
+    /// The display pixel at each window's top left, where it isn't 0,0.
+    origins: Mutex<HashMap<u32, (u32, u32)>>,
     next_conn: AtomicU64,
 }
 
@@ -72,6 +74,7 @@ impl Shared {
             subscribers: Subscribers::default(),
             windows: Mutex::new(HashMap::new()),
             focus: Mutex::new(None),
+            origins: Mutex::new(HashMap::new()),
             next_conn: AtomicU64::new(0),
         })
     }
@@ -85,6 +88,26 @@ impl Shared {
                 .lock()
                 .unwrap()
                 .update_window_focus_state(Some(*id) == window);
+        }
+    }
+
+    /// Called when a window shows its display from `origin`, as a dialog
+    /// window does.
+    pub fn window_origin(&self, window: u32, origin: (u32, u32)) {
+        let mut origins = self.origins.lock().unwrap();
+        if origin == (0, 0) {
+            origins.remove(&window);
+        } else {
+            origins.insert(window, origin);
+        }
+        drop(origins);
+        let w = self.windows.lock().unwrap().get(&window).cloned();
+        if let Some(w) = w {
+            let update = w.tree.lock().unwrap().set_origin(origin);
+            // The tree lock is released first, as in `A11yService::tree`.
+            if let Some(update) = update {
+                w.adapter.lock().unwrap().update_if_active(|| update);
+            }
         }
     }
 
@@ -242,6 +265,8 @@ impl A11yService {
                     return Reply::err(-EBUSY);
                 }
                 let mut t = WindowTree::default();
+                let origin = self.shared.origins.lock().unwrap().get(&window).copied();
+                t.set_origin(origin.unwrap_or_default());
                 if let Err(e) = t.apply(&snap) {
                     crate::warn!("a11y: window {window}: {e}");
                     return Reply::err(-EINVAL);
