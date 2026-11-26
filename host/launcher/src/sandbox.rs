@@ -131,13 +131,35 @@ pub(crate) fn tree_linker(
     }
 }
 
+/// PackageManager's cache of parsed packages, under `/data`.
+const PACKAGE_CACHE: &str = "system/package_cache";
+
+/// Returns whether the root dir `root` was composed from `key`. If it wasn't,
+/// it first removes PackageManager's parse cache from the profile's `/data`,
+/// `data`.
+///
+/// PackageManager keeps a cache entry while it is newer than the package's
+/// directory, and the cache's directory name is the build fingerprint, which
+/// the image fixes. A rebuilt stage replaces APKs inside unchanged
+/// directories, and a Flatpak's files all have mtime 0, so new manifests would
+/// never be parsed. The whole cache goes because the stage, its overlays and
+/// the addons can change any package. The next boot parses every package
+/// again.
+fn composed_from(root: &Path, key: &str, data: &Path) -> Result<bool> {
+    if fs::read_to_string(root.join(".compose-key")).is_ok_and(|k| k == key) {
+        return Ok(true);
+    }
+    remove_tree(&data.join(PACKAGE_CACHE))?;
+    Ok(false)
+}
+
 /// Composes the partitions and `/apex` under the root dir, unless the last
 /// composition had the same inputs.
 fn compose(cfg: &Config) -> Result<()> {
     let r = &cfg.paths.root;
     let key = compose_key(cfg)?;
     let key_file = r.join(".compose-key");
-    if fs::read_to_string(&key_file).is_ok_and(|k| k == key) {
+    if composed_from(r, &key, &cfg.paths.data)? {
         return Ok(());
     }
     remove_tree(r)?;
@@ -601,4 +623,34 @@ pub fn spawn(p: &Paths, exe: &Path, headless: bool) -> Result<()> {
         sleep(Duration::from_millis(100));
     }
     bail!("the session did not come up in 60 s")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_new_composition_drops_the_package_cache() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../out/test/package-cache-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let (root, data) = (dir.join("root"), dir.join("data"));
+        let entry = data
+            .join(PACKAGE_CACHE)
+            .join("fingerprint/InnkeeperSystem-1");
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::write(&entry, "").unwrap();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join(".compose-key"), "a").unwrap();
+        assert!(composed_from(&root, "a", &data).unwrap());
+        assert!(entry.exists(), "the same inputs keep the cache");
+        assert!(!composed_from(&root, "b", &data).unwrap());
+        assert!(!data.join(PACKAGE_CACHE).exists(), "new inputs drop it");
+        assert!(data.join("system").is_dir());
+        // A first start has neither a root nor a cache.
+        fs::remove_dir_all(&dir).unwrap();
+        assert!(!composed_from(&root, "a", &data).unwrap());
+    }
 }
