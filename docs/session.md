@@ -49,9 +49,12 @@ The launcher composes `$XDG_DATA_HOME/innkeeper/root-<profile>` from hardlinks
 to the read-only image cache and from copies of the layers. All of it is
 read-only. Across filesystems it uses reflink copies instead of hardlinks.
 `.compose-key` invalidates the composed root when the image, the stage or the
-addons change. Each start copies the start-time layer over the composed root.
-Symlinks in `/` expose `/system`, `/apex` and `/data`. `/etc` keeps the
-sandbox's files and gains Android's other files.
+addons change. A new composition also drops PackageManager's parse cache,
+`/data/system/package_cache`. PackageManager trusts an entry while it is newer
+than the package's directory, and an updated APK can keep its directory's mtime.
+Each start copies the start-time layer over the composed root. Symlinks in `/`
+expose `/system`, `/apex` and `/data`. `/etc` keeps the sandbox's files and
+gains Android's other files.
 
 The broker injects memfds for `/innkeeper/proc/<path>` on `openat`. It rewrites
 `readlink` and `getcwd` results to Android paths, and it shows the user's files
