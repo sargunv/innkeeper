@@ -115,6 +115,29 @@ each app's requested system-bar visibility (`wm/RequestedInsets.kt`).
 Orientation-driven shape changes wait while a window is fullscreen, maximized or
 tiled.
 
+### Dialogs
+
+A task whose activities are all translucent, such as a dialog-themed share
+target or PackageInstaller's confirmation, gets a window shaped to what it
+shows. The window manager reads the frames of each display's app windows from
+SurfaceFlinger's window infos (`wm/WindowFrames.kt`). The windows that leave
+part of the display uncovered are the dialog, and their union is the crop
+(`wm/DialogBounds.kt`). A translucent activity's own window fills the display,
+so it doesn't count. The bridge shows only the crop of the display, at the
+crop's size, and the user can't resize it. If the crop's border is one
+translucent colour, such as the dim around a Material dialog's inset background,
+the bridge trims the crop to what lies inside it. The display keeps its size, so
+the dialog keeps the layout it would have in a full window.
+
+The window's parent is the window whose app started the task
+(`xdg_toplevel.set_parent`), so the desktop places it over that window.
+`xdg_dialog_v1` would also make it modal, but it is newer than the desktop
+baseline. When the window manager knows the task is translucent before the
+window maps, the bridge holds the window's frames until the crop is known, for
+at most 1.5 s, so the window maps once, at the dialog's size. A translucent
+activity that fills its display, such as a floating button, shows over a dim
+layer instead of the desktop.
+
 ### Hidden windows
 
 A window counts as hidden when xdg-shell reports the `suspended` state. It also
@@ -155,12 +178,14 @@ to the app's window. Android's own SplashScreen doesn't show on these displays.
 
 ### System dialogs
 
-Permission prompts, the share sheet, PackageInstaller, and crash or ANR dialogs
-start in the app's task or display, so they show in the app's window. Android
-always shows the warning that an app was built for an older Android on
-display 0. The window manager shows that warning's text in the app's window
-instead (`AppWarningActivity`). Other dialogs that aren't tied to an activity,
-such as volume or USB dialogs, go to display 0 and aren't seen.
+Permission prompts, the share sheet, and crash or ANR dialogs start in the app's
+task or display, so they show in the app's window. When an app starts
+PackageInstaller's confirmation in a new task, the confirmation shows in a
+dialog window over the app's window ([Dialogs](#dialogs)). Android always shows
+the warning that an app was built for an older Android on display 0. The window
+manager shows that warning's text in the app's window instead
+(`AppWarningActivity`). Other dialogs that aren't tied to an activity, such as
+volume or USB dialogs, go to display 0 and aren't seen.
 
 ## Phone mode
 

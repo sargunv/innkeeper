@@ -280,6 +280,35 @@ sys.exit(1)
       until_ok shape landscape
       wm CLOSE --ei display "$display" >/dev/null
       echo 'ok   requested orientation reshapes the host window'
+      # A dialog-themed activity shows in a window of its dialog's size, which
+      # maps input to the dialog.
+      launch DialogProbe
+      until_ok file_has "$bridge_log" "window $display dialog .*crop=Some"
+      # shellcheck disable=SC2329 # invoked through until_ok
+      dialog_sized() {
+        desktop Geometry dev.sargunv.Innkeeper.dev.sargunv.innkeeper.probes >"$T/dialog.txt" &&
+          /usr/bin/python3 -c '
+import re, sys
+x, y, w, h = map(int, re.findall(r"-?\d+", open(sys.argv[1]).read()))
+sys.exit(0 if 0 < w < 800 and 0 < h < 400 else 1)
+' "$T/dialog.txt"
+      }
+      until_ok dialog_sized
+      read -r x y w h <<<"$(grep -oE -- '-?[0-9]+' "$T/dialog.txt" | tr '\n' ' ')"
+      # The first press can come before the window has pointer focus.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      dialog_clicked() {
+        /usr/bin/python3 "$here/seat.py" "abs:$((x + w / 2)),$((y + h * 2 / 3))" button:272,1 button:272,0
+        log_has InnkeeperDialogProbe clicked
+      }
+      until_ok dialog_clicked
+      wm CLOSE --ei display "$display" >/dev/null
+      echo "ok   a dialog-themed activity's window has its dialog's size and takes its clicks"
+      # A translucent activity that fills its display shows over a dim layer.
+      launch "DialogProbe\$Translucent"
+      until_ok file_has "$bridge_log" "window $display dialog .*crop=None backdrop=true"
+      wm CLOSE --ei display "$display" >/dev/null
+      echo 'ok   a translucent activity that fills its window has a backdrop'
       /usr/bin/python3 "$here/app-settings.py"
       ;;
     audio)

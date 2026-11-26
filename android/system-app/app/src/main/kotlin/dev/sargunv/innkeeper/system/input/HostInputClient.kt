@@ -17,6 +17,7 @@ import dev.sargunv.innkeeper.system.InnkeeperSystemApp
 import dev.sargunv.innkeeper.system.bridge.Blob
 import dev.sargunv.innkeeper.system.bridge.BridgeConnection
 import dev.sargunv.innkeeper.system.bridge.Wire
+import dev.sargunv.innkeeper.system.wm.DialogBounds
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
@@ -156,6 +157,24 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   /** Android's rotation of [window]'s content in its buffer, in quarter turns (phone mode). */
   fun windowRotation(window: Int, rotation: Int) =
     connection.send(WINDOW_ROTATION) { u32(window).u32(rotation) }
+
+  /**
+   * Shows only [crop] of the display (null: all of it) in a window that stays its size, and makes
+   * [parent]'s window (null: none) its parent. With [hold], sent with the window's request, the
+   * window shows nothing until a call without it. A [backdrop] dims the window under the display.
+   */
+  fun windowDialog(
+    window: Int,
+    parent: Int?,
+    crop: DialogBounds.Rect?,
+    hold: Boolean = false,
+    backdrop: Boolean = false,
+  ) =
+    connection.send(WINDOW_DIALOG) {
+      u32(window).u32(parent ?: -1).u32((if (hold) 1 else 0) or (if (backdrop) 2 else 0))
+      if (crop == null) u32(0).u32(0).u32(0).u32(0)
+      else u32(crop.left).u32(crop.top).u32(crop.width).u32(crop.height)
+    }
 
   fun keepAwake(window: Int, requested: Boolean) =
     connection.send(WINDOW_KEEP_AWAKE) { u32(window).u32(if (requested) 1 else 0) }
@@ -308,6 +327,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     private const val WINDOW_TOKEN = 0x060c
     private const val WINDOW_KEEP_AWAKE = 0x060d
     private const val WINDOW_ROTATION = 0x060e
+    private const val WINDOW_DIALOG = 0x060f
     private const val INPUT = 0x4601
     private const val WINDOW_MAPPED = 0x4602
     private const val WINDOW_UNMAPPED = 0x4603

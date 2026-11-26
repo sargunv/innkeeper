@@ -100,6 +100,15 @@ class WindowManagerFeature(
   // first window after boot opens at the desktop's scale.
   private var scale = prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 } ?: 1.0
   private var refreshQueued = false
+  private val dialogs = Runnable { windows.values.forEach(::updateDialog) }
+  /** The frames of the visible app windows on each display. */
+  private var appFrames: Map<Int, List<DialogBounds.Rect>> = emptyMap()
+  private val windowFrames = WindowFrames { f ->
+    handler.post {
+      appFrames = f
+      queueDialogs()
+    }
+  }
   private val changeListeners = CopyOnWriteArrayList<() -> Unit>()
 
   /** Packages with a window, shown or starting (any thread). */
@@ -153,7 +162,21 @@ class WindowManagerFeature(
     val orientations = HashMap<Pair<Int, ComponentName>, Int>()
     var requestedVisibleTypes = WindowInsets.Type.systemBars()
     var insetComponent: ComponentName? = null
+    /** The window whose app started this window's task, for a dialog's parent. */
+    var parent: Int? = null
+    /** The display holds one task, and all of its activities are translucent. */
+    var translucent = false
+    /** What the bridge shows of a translucent task (docs/display.md, "Dialogs"). */
+    var dialog = Dialog()
+    /** The bridge holds the window's frames until its dialog's crop is known. */
+    var hold = false
   }
+
+  private data class Dialog(
+    val parent: Int? = null,
+    val crop: DialogBounds.Rect? = null,
+    val backdrop: Boolean = false,
+  )
 
   /** One row of [list]. */
   data class WindowInfo(
@@ -209,7 +232,7 @@ class WindowManagerFeature(
           wms.clearForcedDisplayDensityForUser(DEFAULT_DISPLAY, userId)
       }
         .onFailure { Log.w(TAG, "display 0: can't reset its density: $it") }
-    if (phone) dm.registerDisplayListener(phoneDisplays, handler)
+    if (phone) dm.registerDisplayListener(phoneDisplays, handler) else windowFrames.start(context)
     handler.post { if (phone) requestPhoneWindow() else refreshTasks() }
   }
 
@@ -477,6 +500,7 @@ class WindowManagerFeature(
         sizing,
         r.token,
         if (r.newWindow) null else recent?.taskDescription,
+        translucent = isTranslucent(intent),
       ) ?: return "error: no virtual display"
     // An existing task, such as one started on display 0, moves over instead of starting anew.
     val existing = tasksOf(r.pkg).firstOrNull()
@@ -500,6 +524,28 @@ class WindowManagerFeature(
     atm.focusTopTask(w.id)
   }
 
+  /** The activity's theme makes its window translucent or floating, as a dialog's theme does. */
+  private fun isTranslucent(intent: Intent): Boolean =
+    try {
+      val ai = context.packageManager.resolveActivity(intent, 0)?.activityInfo
+      if (ai == null) false
+      else {
+        val theme = context.createPackageContext(ai.packageName, 0).resources.newTheme()
+        theme.applyStyle(ai.themeResource, true)
+        val a =
+          theme.obtainStyledAttributes(
+            intArrayOf(android.R.attr.windowIsTranslucent, android.R.attr.windowIsFloating),
+          )
+        try {
+          a.getBoolean(0, false) || a.getBoolean(1, false)
+        } finally {
+          a.recycle()
+        }
+      }
+    } catch (e: Exception) {
+      false
+    }
+
   private fun sizingFor(intent: Intent): WindowSizing {
     val ai =
       try {
@@ -516,6 +562,8 @@ class WindowManagerFeature(
     sizing: WindowSizing,
     token: String = "",
     description: ActivityManager.TaskDescription? = null,
+    parent: Int? = null,
+    translucent: Boolean = false,
   ): AppWindow? {
     val s = scale
     val width = (sizing.widthDp * s).roundToInt()
@@ -536,6 +584,10 @@ class WindowManagerFeature(
       return null
     }
     val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing, token)
+    w.parent = parent
+    w.translucent = translucent
+    w.hold = translucent
+    if (translucent) handler.postDelayed({ updateDialog(w) }, DIALOG_HOLD_MS)
     w.lastColor = description?.primaryColor ?: 0
     w.lastIcon = Wire.Writer().image(iconFor(pkg, description)).bytes()
     reader.bind(w.id)
@@ -583,6 +635,7 @@ class WindowManagerFeature(
       )
     if (!requested || !input.windowAppearance(w.id, w.lastColor ?: 0, w.lastIcon!!, wait = true))
       return
+    if (w.hold) input.windowDialog(w.id, w.parent, null, hold = true)
     w.token = "" // used once
     w.display.surface = w.reader.surface
   }
@@ -735,6 +788,7 @@ class WindowManagerFeature(
               }
           } else input.keepAwake(it.id, it.keepAwake)
           it.shown.countDown()
+          queueDialogs()
           sendPolicy(it)
           queueAppearance(it)
         }
@@ -771,6 +825,7 @@ class WindowManagerFeature(
   private fun remap(w: AppWindow) {
     if (windows[w.id] !== w) return
     w.mapped = false
+    w.dialog = Dialog() // the bridge's new window has none
     w.hostOutputs = emptyMap()
     setVisible(w, true)
     w.display.surface = null
@@ -837,6 +892,32 @@ class WindowManagerFeature(
     }
     w.appearance = r
     handler.postDelayed(r, 120)
+  }
+
+  // Windows move and resize every frame while they animate in, so wait until they settle.
+  private fun queueDialogs() {
+    handler.removeCallbacks(dialogs)
+    handler.postDelayed(dialogs, DIALOG_SETTLE_MS)
+  }
+
+  // A translucent task, such as a dialog-themed activity or PackageInstaller's confirmation, shows
+  // only the windows that don't fill its display, in a window parented to the app that started it.
+  private fun updateDialog(w: AppWindow) {
+    if (windows[w.id] !== w) return
+    val crop =
+      if (w.translucent) DialogBounds.crop(w.width, w.height, appFrames[w.id].orEmpty()) else null
+    val parent = w.parent?.takeIf { w.translucent && it in windows }
+    // A translucent activity that fills its display gets a dim layer, so the desktop doesn't show
+    // through its transparent pixels.
+    val dialog = Dialog(parent, crop, w.translucent && crop == null)
+    if (w.hold) {
+      // A translucent activity may open its dialog after its own first frame.
+      if (crop == null && SystemClock.uptimeMillis() - w.created < DIALOG_HOLD_MS) return
+      w.hold = false
+    } else if (!w.mapped || dialog == w.dialog) return
+    w.dialog = dialog
+    Log.i(TAG, "display ${w.id}: $dialog")
+    input.windowDialog(w.id, parent, crop, backdrop = dialog.backdrop)
   }
 
   private fun sendPolicy(w: AppWindow) {
@@ -969,6 +1050,8 @@ class WindowManagerFeature(
               sizingFor(t.baseIntent ?: Intent()),
               token = if (source in windows) input.activationToken(source) else "",
               description = t.taskDescription,
+              parent = source.takeIf { it in windows },
+              translucent = Tasks.isTranslucent(t),
             )
           TaskRouting.Destination.Ignore -> null
         } ?: continue
@@ -986,6 +1069,11 @@ class WindowManagerFeature(
           it.topActivity?.className != AppWarningActivity::class.java.name
         }
       w.tasks = ts.map { it.taskId }
+      val translucent = ts.size == 1 && Tasks.isTranslucent(ts[0])
+      if (translucent != w.translucent) {
+        w.translucent = translucent
+        queueDialogs()
+      }
       w.orientations.keys.retainAll { it.first in w.tasks }
       val top = ts.firstOrNull()
       if (top?.taskId != w.topTask) {
@@ -1045,6 +1133,8 @@ class WindowManagerFeature(
     private const val INVALID_DISPLAY = -1
     private const val MAX_TASKS = 200
     private const val SIZE_DEBOUNCE_MS = 120L
+    private const val DIALOG_SETTLE_MS = 150L
+    private const val DIALOG_HOLD_MS = 1_000L
     private const val LAUNCH_TIMEOUT_MS = 20_000L
     private const val RELEASE_POLL_MS = 50L
     private const val RELEASE_SETTLE_MS = 500L
