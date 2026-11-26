@@ -12,6 +12,8 @@
 
 #include <system/camera_metadata.h>
 
+#include "Convert.h"
+
 namespace innkeeper::camera {
 
 struct Size {
@@ -68,13 +70,15 @@ std::vector<uint8_t> defaultRequest(int32_t requestTemplate);
 // Whether `blob` is a well-formed camera_metadata_t.
 bool validMetadata(const std::vector<uint8_t>& blob);
 
-// A capture result: the request's settings, the frame's timestamp and the
-// 3A states of a fixed-focus camera that converged at once.
+// A capture result: the request's settings with its JPEG settings as
+// applied, the frame's timestamp and the 3A states of a fixed-focus camera
+// that converged at once.
 std::vector<uint8_t> captureResult(
   const std::vector<uint8_t>& settings, int64_t timestampNs
 );
 
-// The request's JPEG quality, or 90.
-int jpegQuality(const std::vector<uint8_t>& settings);
+// The request's JPEG settings: qualities from 1 to 100, the orientation
+// rounded to a quarter turn, and an advertised thumbnail size or none.
+JpegParams jpegParams(const std::vector<uint8_t>& settings);
 
 }  // namespace innkeeper::camera

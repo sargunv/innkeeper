@@ -341,17 +341,14 @@ std::shared_ptr<Buffer> Session::buffer(const Pending::Out& o) {
   return it == mBuffers.end() ? nullptr : it->second;
 }
 
-bool Session::fill(const Stream& s, Buffer& b, const Frame& f, int quality) {
+bool Session::fill(
+  const Stream& s, Buffer& b, const Frame& f, const JpegParams& jpeg
+) {
   Nv12 src{f.data.data(), f.width, f.height};
   if (int32_t(s.format) == kFormatBlob) {
-    uint32_t w = uint32_t(s.width), h = uint32_t(s.height);
-    uint32_t cw = (w + 1) / 2, ch = (h + 1) / 2;
-    std::vector<uint8_t> i420(size_t(w) * h + 2 * size_t(cw) * ch);
-    uint8_t* cb = i420.data() + size_t(w) * h;
-    YuvTarget t{i420.data(), cb, cb + size_t(cw) * ch, w, h, w, cw, 1};
-    scaleNv12(src, t);
-    expandRange(i420.data(), w, h);
-    return b.writeJpeg(encodeJpeg(i420.data(), w, h, quality));
+    return b.writeJpeg(
+      captureJpeg(src, uint32_t(s.width), uint32_t(s.height), jpeg)
+    );
   }
   YuvTarget t;
   if (!b.yuv(&t)) {
@@ -397,7 +394,7 @@ void Session::process(Pending& p) {
   r.inputBuffer.streamId = -1;
   r.partialResult = 1;
   r.result.metadata = captureResult(mSettings, ts);
-  int quality = jpegQuality(mSettings);
+  JpegParams jpeg = jpegParams(mSettings);
   for (auto& o : p.outputs) {
     bool ok = true;
     if (o.acquireFence >= 0) {
@@ -414,7 +411,7 @@ void Session::process(Pending& p) {
       std::lock_guard lock(mMutex);
       s = mStreams[o.streamId];
     }
-    ok = b && fill(s, *b, mFrame, quality);
+    ok = b && fill(s, *b, mFrame, jpeg);
     StreamBuffer sb;
     sb.streamId = o.streamId;
     sb.bufferId = o.bufferId;

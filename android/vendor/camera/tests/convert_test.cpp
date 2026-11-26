@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Host tests for the camera HAL's pixel work: scaling NV12 into each gralloc
-// YCbCr layout with a centered crop, and the JPEG encoder's stream. With an
-// output path argument, it also writes a test JPEG for a decoder to check.
+// YCbCr layout with a centered crop, range expansion, and the JPEG encoder's
+// stream with its Exif orientation and thumbnail. With an output path
+// argument, it also writes a test JPEG for a decoder to check.
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +37,34 @@ std::vector<uint8_t> pattern(uint32_t w, uint32_t h) {
     }
   }
   return f;
+}
+
+// Seeded noise, the hardest image for a JPEG encoder.
+std::vector<uint8_t> noise(size_t n) {
+  std::vector<uint8_t> v(n);
+  uint32_t x = 12345;
+  for (auto& b : v) {
+    x = x * 1103515245 + 12345;
+    b = uint8_t(x >> 16);
+  }
+  return v;
+}
+
+uint32_t be16(const uint8_t* p) { return uint32_t(p[0] << 8 | p[1]); }
+uint32_t be32(const uint8_t* p) { return be16(p) << 16 | be16(p + 2); }
+
+// The size in the first SOF0 at or after `from`.
+bool sofSize(
+  const std::vector<uint8_t>& j, size_t from, uint32_t* w, uint32_t* h
+) {
+  for (size_t i = from; i + 9 < j.size(); i++) {
+    if (j[i] == 0xff && j[i + 1] == 0xc0) {
+      *h = be16(&j[i + 5]);
+      *w = be16(&j[i + 7]);
+      return true;
+    }
+  }
+  return false;
 }
 
 void sameSizeIsACopy() {
@@ -103,17 +132,10 @@ void jpegStream(const char* path) {
   CHECK(j.size() > 200);
   CHECK(j[0] == 0xff && j[1] == 0xd8);
   CHECK(j[j.size() - 2] == 0xff && j.back() == 0xd9);
-  // SOF0 carries the size.
-  bool found = false;
-  for (size_t i = 0; i + 9 < j.size(); i++) {
-    if (j[i] == 0xff && j[i + 1] == 0xc0) {
-      CHECK((j[i + 5] << 8 | j[i + 6]) == int(h));
-      CHECK((j[i + 7] << 8 | j[i + 8]) == int(w));
-      found = true;
-      break;
-    }
-  }
-  CHECK(found);
+  // A JFIF APP0, and SOF0 carries the size.
+  CHECK(j[2] == 0xff && j[3] == 0xe0 && memcmp(&j[6], "JFIF", 5) == 0);
+  uint32_t sw, sh;
+  CHECK(sofSize(j, 0, &sw, &sh) && sw == w && sh == h);
   // Lower quality makes a smaller file.
   CHECK(encodeJpeg(i420.data(), w, h, 10).size() < j.size());
   if (path) {
@@ -121,6 +143,81 @@ void jpegStream(const char* path) {
     fwrite(j.data(), 1, j.size(), f);
     fclose(f);
   }
+}
+
+void exifSegmentBytes() {
+  // Orientation 90 is TIFF's 6, and IFD1 points at the thumbnail.
+  const std::vector<uint8_t> thumb = {0xff, 0xd8, 1, 2, 3, 0xff, 0xd9};
+  auto e = exifSegment(90, thumb);
+  CHECK(e.size() == 74 + thumb.size());
+  CHECK(memcmp(e.data(), "Exif\0\0MM\0*", 10) == 0);
+  const uint8_t* t = e.data() + 6;
+  CHECK(be32(t + 4) == 8);
+  CHECK(be16(t + 8) == 1);
+  CHECK(be16(t + 10) == 0x0112 && be16(t + 12) == 3 && be16(t + 18) == 6);
+  CHECK(be32(t + 22) == 26);
+  CHECK(be16(t + 26) == 3);
+  CHECK(be16(t + 28) == 0x0103 && be16(t + 36) == 6);
+  CHECK(be16(t + 40) == 0x0201 && be32(t + 48) == 68);
+  CHECK(be16(t + 52) == 0x0202 && be32(t + 60) == thumb.size());
+  CHECK(be32(t + 64) == 0);
+  CHECK(memcmp(t + 68, thumb.data(), thumb.size()) == 0);
+  // The other quarter turns. Without a thumbnail, IFD0 ends the chain.
+  e = exifSegment(180, {});
+  CHECK(e.size() == 32 && be16(&e[24]) == 3 && be32(&e[28]) == 0);
+  CHECK(be16(&exifSegment(270, {})[24]) == 8);
+  CHECK(be16(&exifSegment(0, {})[24]) == 1);
+  // A thumbnail too large for the segment is left out.
+  std::vector<uint8_t> most(kMaxThumbnailBytes), over(kMaxThumbnailBytes + 1);
+  CHECK(exifSegment(0, most).size() == 65533);
+  CHECK(exifSegment(0, over).size() == 32);
+}
+
+// The Exif payload of a captureJpeg result, and its thumbnail.
+void exifOf(
+  const std::vector<uint8_t>& j, std::vector<uint8_t>* exif,
+  std::vector<uint8_t>* thumb
+) {
+  CHECK(j[2] == 0xff && j[3] == 0xe1);
+  exif->assign(j.begin() + 6, j.begin() + 4 + be16(&j[4]));
+  CHECK(memcmp(exif->data(), "Exif\0\0", 6) == 0);
+  thumb->clear();
+  const uint8_t* t = exif->data() + 6;
+  uint32_t ifd1 = be32(t + 22);
+  if (!ifd1) return;
+  uint32_t off = be32(t + ifd1 + 22), n = be32(t + ifd1 + 34);
+  CHECK(6 + off + n <= exif->size());
+  thumb->assign(t + off, t + off + n);
+}
+
+void captureWithThumbnail() {
+  // A 64x48 capture of a 128x48 frame, with a 32x24 thumbnail.
+  auto f = noise(128 * 48 * 3 / 2);
+  JpegParams p;
+  p.orientation = 270;
+  p.thumbWidth = 32;
+  p.thumbHeight = 24;
+  auto j = captureJpeg({f.data(), 128, 48}, 64, 48, p);
+  std::vector<uint8_t> exif, thumb;
+  exifOf(j, &exif, &thumb);
+  CHECK(be16(&exif[6 + 18]) == 8);
+  CHECK(thumb.size() > 4 && thumb[0] == 0xff && thumb[1] == 0xd8);
+  CHECK(thumb[thumb.size() - 2] == 0xff && thumb.back() == 0xd9);
+  uint32_t w, h;
+  CHECK(sofSize(thumb, 0, &w, &h) && w == 32 && h == 24);
+  CHECK(sofSize(j, 4 + be16(&j[4]), &w, &h) && w == 64 && h == 48);
+  // No thumbnail asked for, none written.
+  p.thumbWidth = p.thumbHeight = 0;
+  exifOf(captureJpeg({f.data(), 128, 48}, 64, 48, p), &exif, &thumb);
+  CHECK(thumb.empty());
+  // A noisy 320x240 thumbnail at quality 100 is far over Exif's 64 KiB, so
+  // it is encoded at a lower quality.
+  auto big = noise(640 * 480 * 3 / 2);
+  p.thumbWidth = 320;
+  p.thumbHeight = 240;
+  p.thumbQuality = 100;
+  exifOf(captureJpeg({big.data(), 640, 480}, 640, 480, p), &exif, &thumb);
+  CHECK(!thumb.empty() && thumb.size() <= kMaxThumbnailBytes);
 }
 
 }  // namespace
@@ -131,5 +228,7 @@ int main(int argc, char** argv) {
   cropsToTheAspectRatio();
   expandsToFullRange();
   jpegStream(argc > 1 ? argv[1] : nullptr);
+  exifSegmentBytes();
+  captureWithThumbnail();
   return 0;
 }

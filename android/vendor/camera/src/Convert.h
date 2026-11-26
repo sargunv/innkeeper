@@ -37,10 +37,39 @@ void scaleNv12(const Nv12& src, const YuvTarget& dst);
 // JFIF colour space needs.
 void expandRange(uint8_t* i420, uint32_t width, uint32_t height);
 
-// Encodes a tightly packed, full-range I420 image as a baseline JFIF JPEG at
-// `quality` (1 to 100).
+// Encodes a tightly packed, full-range I420 image as a baseline JPEG at
+// `quality` (1 to 100). Its application segment is `app1` as APP1, or a JFIF
+// APP0 if `app1` is empty.
 std::vector<uint8_t> encodeJpeg(
-  const uint8_t* i420, uint32_t width, uint32_t height, int quality
+  const uint8_t* i420, uint32_t width, uint32_t height, int quality,
+  const std::vector<uint8_t>& app1 = {}
+);
+
+// The largest thumbnail an Exif APP1 segment holds: a segment's 65533 bytes
+// less exifSegment's 74.
+inline constexpr size_t kMaxThumbnailBytes = 65533 - 74;
+
+// The payload of an Exif APP1 segment: the orientation, as the clockwise
+// rotation in degrees (0, 90, 180 or 270) that shows the image upright, and
+// the JPEG `thumbnail` unless it is empty or over kMaxThumbnailBytes.
+std::vector<uint8_t> exifSegment(
+  int orientation, const std::vector<uint8_t>& thumbnail
+);
+
+// What a still capture asks for. A 0x0 thumbnail means none.
+struct JpegParams {
+  int quality = 90;
+  int orientation = 0;
+  uint32_t thumbWidth = 0, thumbHeight = 0;
+  int thumbQuality = 90;
+};
+
+// Encodes limited-range `src` as a width x height JPEG, cropped and scaled as
+// scaleNv12 does, with an Exif segment that carries the orientation and a
+// thumbnail cropped from the image. A thumbnail too large for Exif at its
+// quality is encoded at a lower one.
+std::vector<uint8_t> captureJpeg(
+  const Nv12& src, uint32_t width, uint32_t height, const JpegParams& p
 );
 
 }  // namespace innkeeper::camera

@@ -2,6 +2,7 @@
 // The keys follow AOSP's external (USB) camera HAL, which reports the same
 // kind of device: a fixed-focus webcam with automatic exposure and white
 // balance, hardware level EXTERNAL.
+#include <algorithm>
 #include <cstring>
 
 #include <system/camera_metadata.h>
@@ -15,6 +16,11 @@ namespace {
 // A JPEG holds at most this many bytes, plus the CameraBlob trailer.
 constexpr int32_t kJpegMaxSize = 1280 * 720 * 3 / 2 + 1024;
 constexpr int64_t kFrameNs = 1'000'000'000LL / kMaxFps;
+
+// Width and height pairs, by area. 0x0 means no thumbnail.
+const std::vector<int32_t> kThumbnailSizes = {
+  0, 0, 176, 144, 240, 144, 256, 144, 240, 160, 256, 154, 240, 240, 320, 240
+};
 
 // The request and result keys a client may use.
 const std::vector<int32_t> kRequestKeys = {
@@ -181,10 +187,7 @@ Metadata characteristics() {
     ANDROID_INFO_SUPPORTED_HARDWARE_LEVEL,
     {ANDROID_INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL}
   );
-  m.set<int32_t>(
-    ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES,
-    {0, 0, 176, 144, 240, 144, 256, 144, 240, 160, 256, 154, 240, 240, 320, 240}
-  );
+  m.set(ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES, kThumbnailSizes);
   m.set<int32_t>(ANDROID_JPEG_MAX_SIZE, {kJpegMaxSize});
   m.set<uint8_t>(ANDROID_LENS_FACING, {ANDROID_LENS_FACING_EXTERNAL});
   m.set<float>(ANDROID_LENS_INFO_AVAILABLE_FOCAL_LENGTHS, {3.0f});
@@ -416,6 +419,14 @@ std::vector<uint8_t> captureResult(
       if (bytes) m.setRaw(e.tag, e.count, e.data.u8, bytes);
     }
   }
+  // The JPEG settings as applied.
+  JpegParams j = jpegParams(settings);
+  m.set<uint8_t>(ANDROID_JPEG_QUALITY, {uint8_t(j.quality)});
+  m.set<uint8_t>(ANDROID_JPEG_THUMBNAIL_QUALITY, {uint8_t(j.thumbQuality)});
+  m.set<int32_t>(ANDROID_JPEG_ORIENTATION, {j.orientation});
+  m.set<int32_t>(
+    ANDROID_JPEG_THUMBNAIL_SIZE, {int32_t(j.thumbWidth), int32_t(j.thumbHeight)}
+  );
   m.set<int64_t>(ANDROID_SENSOR_TIMESTAMP, {timestampNs});
   m.set<uint8_t>(
     ANDROID_CONTROL_AE_STATE, {ANDROID_CONTROL_AE_STATE_CONVERGED}
@@ -441,17 +452,33 @@ std::vector<uint8_t> captureResult(
   return m.serialize();
 }
 
-int jpegQuality(const std::vector<uint8_t>& settings) {
-  if (settings.empty()) return 90;
-  camera_metadata_ro_entry_t e;
+JpegParams jpegParams(const std::vector<uint8_t>& settings) {
+  JpegParams p;
+  if (settings.empty()) return p;
   auto* src = reinterpret_cast<const camera_metadata_t*>(settings.data());
-  if (
-    find_camera_metadata_ro_entry(src, ANDROID_JPEG_QUALITY, &e) != 0 ||
-    e.count != 1
-  ) {
-    return 90;
+  auto find = [&](uint32_t tag, size_t count, camera_metadata_ro_entry_t* e) {
+    return find_camera_metadata_ro_entry(src, tag, e) == 0 && e->count == count;
+  };
+  camera_metadata_ro_entry_t e;
+  if (find(ANDROID_JPEG_QUALITY, 1, &e))
+    p.quality = std::clamp<int>(e.data.u8[0], 1, 100);
+  if (find(ANDROID_JPEG_THUMBNAIL_QUALITY, 1, &e))
+    p.thumbQuality = std::clamp<int>(e.data.u8[0], 1, 100);
+  // The nearest quarter turn.
+  if (find(ANDROID_JPEG_ORIENTATION, 1, &e))
+    p.orientation = (e.data.i32[0] % 360 + 360 + 45) % 360 / 90 * 90;
+  if (find(ANDROID_JPEG_THUMBNAIL_SIZE, 2, &e)) {
+    for (size_t i = 0; i < kThumbnailSizes.size(); i += 2) {
+      if (
+        kThumbnailSizes[i] == e.data.i32[0] &&
+        kThumbnailSizes[i + 1] == e.data.i32[1]
+      ) {
+        p.thumbWidth = uint32_t(e.data.i32[0]);
+        p.thumbHeight = uint32_t(e.data.i32[1]);
+      }
+    }
   }
-  return e.data.u8[0];
+  return p;
 }
 
 }  // namespace innkeeper::camera

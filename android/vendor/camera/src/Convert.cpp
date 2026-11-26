@@ -235,7 +235,8 @@ void block(Writer& w, Component& c, const float in[64]) {
 }  // namespace
 
 std::vector<uint8_t> encodeJpeg(
-  const uint8_t* i420, uint32_t width, uint32_t height, int quality
+  const uint8_t* i420, uint32_t width, uint32_t height, int quality,
+  const std::vector<uint8_t>& app1
 ) {
   quality = std::clamp(quality, 1, 100);
   int scale = quality < 50 ? 5000 / quality : 200 - 2 * quality;
@@ -249,11 +250,17 @@ std::vector<uint8_t> encodeJpeg(
   Writer w;
   w.out.reserve(size_t(width) * height / 2 + 1024);
   w.word(0xffd8);
-  // JFIF 1.01, no density, no thumbnail.
-  const uint8_t app0[] = {'J', 'F', 'I', 'F', 0, 1, 1, 0, 0, 1, 0, 1, 0, 0};
-  w.word(0xffe0);
-  w.word(2 + sizeof(app0));
-  for (uint8_t b : app0) w.byte(b);
+  if (!app1.empty()) {
+    w.word(0xffe1);
+    w.word(uint16_t(2 + app1.size()));
+    w.out.insert(w.out.end(), app1.begin(), app1.end());
+  } else {
+    // JFIF 1.01, no density, no thumbnail.
+    const uint8_t app0[] = {'J', 'F', 'I', 'F', 0, 1, 1, 0, 0, 1, 0, 1, 0, 0};
+    w.word(0xffe0);
+    w.word(2 + sizeof(app0));
+    for (uint8_t b : app0) w.byte(b);
+  }
   w.word(0xffdb);
   w.word(2 + 2 * 65);
   for (int t = 0; t < 2; t++) {
@@ -317,6 +324,92 @@ std::vector<uint8_t> encodeJpeg(
   w.flush();
   w.word(0xffd9);
   return std::move(w.out);
+}
+
+std::vector<uint8_t> exifSegment(
+  int orientation, const std::vector<uint8_t>& thumbnail
+) {
+  const bool thumb =
+    !thumbnail.empty() && thumbnail.size() <= kMaxThumbnailBytes;
+  std::vector<uint8_t> e = {'E', 'x', 'i', 'f', 0, 0};
+  auto u16 = [&](uint32_t v) {
+    e.push_back(uint8_t(v >> 8));
+    e.push_back(uint8_t(v));
+  };
+  auto u32 = [&](uint32_t v) {
+    u16(v >> 16);
+    u16(v & 0xffff);
+  };
+  // An IFD entry of one SHORT (type 3) or LONG (type 4).
+  auto entry = [&](uint16_t tag, uint16_t type, uint32_t v) {
+    u16(tag);
+    u16(type);
+    u32(1);
+    if (type == 3) {
+      u16(v);
+      u16(0);
+    } else {
+      u32(v);
+    }
+  };
+  // A big-endian TIFF header. Offsets count from it.
+  e.insert(e.end(), {'M', 'M', 0, 42});
+  u32(8);
+  // IFD0 at 8: TIFF's orientation code for the rotation.
+  const uint16_t codes[4] = {1, 6, 3, 8};
+  u16(1);
+  entry(0x0112, 3, codes[(orientation / 90) & 3]);
+  u32(thumb ? 26 : 0);
+  if (thumb) {
+    // IFD1 at 26: the JPEG thumbnail that follows it at 68.
+    u16(3);
+    entry(0x0103, 3, 6);
+    entry(0x0201, 4, 68);
+    entry(0x0202, 4, uint32_t(thumbnail.size()));
+    u32(0);
+    e.insert(e.end(), thumbnail.begin(), thumbnail.end());
+  }
+  return e;
+}
+
+namespace {
+
+// Scales `src` into a tightly packed width x height image, NV12 or I420.
+std::vector<uint8_t> scaled(
+  const Nv12& src, uint32_t width, uint32_t height, bool i420
+) {
+  const uint32_t cw = (width + 1) / 2, ch = (height + 1) / 2;
+  std::vector<uint8_t> out(size_t(width) * height + 2 * size_t(cw) * ch);
+  uint8_t* c = out.data() + size_t(width) * height;
+  YuvTarget t{out.data(), c, c + 1, width, height, width, 2 * size_t(cw), 2};
+  if (i420)
+    t = {out.data(), c, c + size_t(cw) * ch, width, height, width, cw, 1};
+  scaleNv12(src, t);
+  return out;
+}
+
+}  // namespace
+
+std::vector<uint8_t> captureJpeg(
+  const Nv12& src, uint32_t width, uint32_t height, const JpegParams& p
+) {
+  std::vector<uint8_t> image = scaled(src, width, height, false);
+  const Nv12 primary{image.data(), width, height};
+  std::vector<uint8_t> thumb;
+  if (p.thumbWidth && p.thumbHeight) {
+    auto t = scaled(primary, p.thumbWidth, p.thumbHeight, true);
+    expandRange(t.data(), p.thumbWidth, p.thumbHeight);
+    for (int q = std::clamp(p.thumbQuality, 1, 100);; q /= 2) {
+      thumb = encodeJpeg(t.data(), p.thumbWidth, p.thumbHeight, q);
+      if (thumb.size() <= kMaxThumbnailBytes || q == 1) break;
+    }
+  }
+  // At the same size, scaling only splits the chroma into planes.
+  std::vector<uint8_t> i420 = scaled(primary, width, height, true);
+  expandRange(i420.data(), width, height);
+  return encodeJpeg(
+    i420.data(), width, height, p.quality, exifSegment(p.orientation, thumb)
+  );
 }
 
 }  // namespace innkeeper::camera

@@ -93,7 +93,9 @@ class Session : public device::BnCameraDeviceSession {
   void process(Pending& p);
   void fail(Pending& p, bool device);
   std::shared_ptr<Buffer> buffer(const Pending::Out& o);
-  bool fill(const device::Stream& s, Buffer& b, const Frame& f, int quality);
+  bool fill(
+    const device::Stream& s, Buffer& b, const Frame& f, const JpegParams& jpeg
+  );
   void closePending(Pending& p);
   // Moves an unwaited acquire fence into the buffer's release fence.
   static void returnFence(Pending::Out& o, device::StreamBuffer* sb);

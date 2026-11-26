@@ -25,10 +25,12 @@ cuttlefish's emulated camera APEX.
   NV12 into a read-only frame ring. For each request, the session takes the
   newest frame, crops its center to each stream's aspect ratio and scales it
   with nearest neighbour into the gralloc buffer, which it maps through our
-  allocator's handle (`graphics/common`). JPEG streams get a baseline JFIF
-  encoded here (`Convert.cpp`). Until the first frame arrives, for example while
-  the portal's dialog is open, frames are black at 30 fps, so cameraserver's
-  pipeline doesn't stall.
+  allocator's handle (`graphics/common`). JPEG streams get a baseline JPEG
+  encoded here (`Convert.cpp`), expanded from the camera's limited range to
+  JPEG's full range. Its Exif segment carries `JPEG_ORIENTATION` as the
+  orientation tag, without rotating pixels, and the requested thumbnail. Until
+  the first frame arrives, for example while the portal's dialog is open, frames
+  are black at 30 fps, so cameraserver's pipeline doesn't stall.
 - **Metadata** travels inline, without FMQs. Results repeat the request's
   settings and add the timestamp and converged 3A states.
 - **LL-NDK only.** The HAL links libbinder_ndk and libcamera_metadata through
@@ -36,7 +38,8 @@ cuttlefish's emulated camera APEX.
   snapshots come from `android/vendor/third_party/aosp`.
 
 Tests: `tests/convert_test.cpp` runs in `mise run test` and checks scaling into
-each YCbCr layout and the JPEG stream. The camera group of `mise run test:e2e`
-plays a white virtual camera on the nested desktop's PipeWire. The fake Camera
-portal allows it, and a Camera2 ImageReader in the probes app must see white
-frames. Start reading at `src/Session.cpp`.
+each YCbCr layout, range expansion, and the JPEG stream with its Exif segment.
+The camera group of `mise run test:e2e` plays a white virtual camera on the
+nested desktop's PipeWire. The fake Camera portal allows it, and a Camera2
+ImageReader in the probes app must see white frames. Start reading at
+`src/Session.cpp`.
