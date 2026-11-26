@@ -27,9 +27,11 @@ sequenceDiagram
 
 - **One trusted VirtualDisplay per window.** The window manager
   (`wm/WindowManagerFeature.kt`) gives each display its own display group and
-  focus, and no system decorations, so apps see zero system-bar insets. Each
-  display's sink is an RGBA ImageReader. Each image stays alive until the host
-  compositor releases its pixels.
+  focus, and no system decorations, so apps see zero system-bar insets. The
+  display is public, so SystemUI can draw the app's toasts and splash screen on
+  it. It still shows only its own content. Each display's sink is an RGBA
+  ImageReader. Each image stays alive until the host compositor releases its
+  pixels.
 - **HWC-backed virtual displays.** With `debug.sf.enable_hwc_vds=1`,
   SurfaceFlinger hands every frame to the composer, which supports 32 virtual
   displays. Content stays CLIENT and is rendered into the sink buffer. The
@@ -151,7 +153,13 @@ desktop entry as `X-Innkeeper-Splash` and `X-Innkeeper-Window`. The splash takes
 the desktop's activation token, which ends the desktop's startup feedback. It
 then gets a new token for the app's window, so focus passes from the splash to
 the app. When the session is already running, the desktop's token goes directly
-to the app's window. Android's own SplashScreen doesn't show on these displays.
+to the app's window.
+
+The host splash covers only the session's boot, when Android can't draw yet. It
+closes on the app window's first frame. When the app's process starts, WMShell
+draws Android's own splash screen in that window, as on a phone, because
+SystemUI sees the public display. Both splashes take their colour from the app's
+`windowSplashScreenBackground`, or else its window background.
 
 ### System dialogs
 
@@ -161,6 +169,10 @@ always shows the warning that an app was built for an older Android on
 display 0. The window manager shows that warning's text in the app's window
 instead (`AppWarningActivity`). Other dialogs that aren't tied to an activity,
 such as volume or USB dialogs, go to display 0 and aren't seen.
+
+A text toast shows in the window of the activity that made it, because SystemUI
+draws it on that activity's display. A toast made from an application or service
+context goes to display 0 and isn't seen.
 
 ## Phone mode
 

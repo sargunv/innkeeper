@@ -411,6 +411,13 @@ if (
       s am broadcast -a dev.sargunv.innkeeper.WINDOW_PROBE -p dev.sargunv.innkeeper.probes --es mode flag --ez enabled false >/dev/null
       until_ok file_has "$bridge_log" "window $display idle-inhibit off"
       echo 'ok   a visible keep-screen-on request inhibits desktop idle until cleared'
+      # SystemUI draws an activity's text toast on that activity's display, so
+      # it shows in the app's window.
+      s am broadcast -a dev.sargunv.innkeeper.WINDOW_PROBE -p dev.sargunv.innkeeper.probes --es mode toast --es text 'innkeeper-e2e toast' >/dev/null
+      # shellcheck disable=SC2329 # invoked through until_ok
+      toast_shown() { s dumpsys window windows | grep -A3 'Window{.* Toast}:' | grep -q "mDisplayId=$display "; }
+      until_ok toast_shown
+      echo "ok   an activity's toast shows in its window"
       launch TaskWindowProbe
       first=$display
       # shellcheck disable=SC2329 # invoked through until_ok
