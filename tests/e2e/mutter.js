@@ -45,6 +45,7 @@ export async function run() {
       <method name="Screenshot"><arg type="s" direction="in"/></method>
       <method name="Position"><arg type="b" direction="out"/></method>
       <method name="Geometry"><arg type="s" direction="in"/><arg type="(iiii)" direction="out"/></method>
+      <method name="DialogGeometry"><arg type="s" direction="in"/><arg type="(iiii)" direction="out"/></method>
       <method name="Resize"><arg type="s" direction="in"/><arg type="i" direction="in"/><arg type="i" direction="in"/><arg type="b" direction="out"/></method>
       <method name="Close"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
       <method name="Layout"><arg type="s" direction="in"/></method>
@@ -191,6 +192,24 @@ export async function run() {
         for (const actor of global.get_window_actors()) {
           const window = actor.meta_window;
           if (!actor.mapped || !String(window.get_wm_class()).includes(appId))
+            continue;
+          const r = window.get_frame_rect();
+          return [r.x, r.y, r.width, r.height];
+        }
+        return [0, 0, 0, 0];
+      },
+      // The frame of a window whose class and whose parent's class contain
+      // appId.
+      DialogGeometry(appId) {
+        for (const actor of global.get_window_actors()) {
+          const window = actor.meta_window;
+          const parent = window.get_transient_for();
+          if (
+            !actor.mapped ||
+            !parent ||
+            !String(window.get_wm_class()).includes(appId) ||
+            !String(parent.get_wm_class()).includes(appId)
+          )
             continue;
           const r = window.get_frame_rect();
           return [r.x, r.y, r.width, r.height];

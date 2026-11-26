@@ -2,14 +2,16 @@
 package dev.sargunv.innkeeper.probes
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 
 /**
- * A dialog-themed activity, like a share target, and a translucent one that fills its display with
- * a small view, like a floating button. A touch outside doesn't finish the dialog, so only a click
- * that lands on its button counts.
+ * A dialog-themed activity, like a share target, and a translucent one whose UI fills its display,
+ * like a floating button or an app that swipes back to the activity behind it. A touch outside
+ * doesn't finish the dialog, so only a click that lands on its button counts.
  */
 open class DialogProbe : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,7 +27,18 @@ open class DialogProbe : Activity() {
     Log.i(TAG, "${javaClass.simpleName} created display=${display?.displayId}")
   }
 
-  class Translucent : DialogProbe()
+  /** `--ez popup true` opens an app dialog over the activity's UI. */
+  class Translucent : DialogProbe() {
+    override fun onNewIntent(intent: Intent) {
+      super.onNewIntent(intent)
+      if (!intent.getBooleanExtra("popup", false)) return
+      AlertDialog.Builder(this)
+        .setMessage("Dialog probe popup")
+        .setPositiveButton("OK", null)
+        .show()
+      Log.i(TAG, "popup shown")
+    }
+  }
 
   companion object {
     private const val TAG = "InnkeeperDialogProbe"

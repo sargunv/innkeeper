@@ -280,13 +280,20 @@ sys.exit(1)
       until_ok shape landscape
       wm CLOSE --ei display "$display" >/dev/null
       echo 'ok   requested orientation reshapes the host window'
-      # A dialog-themed activity shows in a window of its dialog's size, which
-      # maps input to the dialog.
-      launch DialogProbe
-      until_ok file_has "$bridge_log" "window $display dialog .*crop=Some"
+      # A dialog-themed activity that an app starts in a new task, as a share
+      # target is, shows in a window of its dialog's size. The window is the
+      # app window's child, and it maps input to the dialog.
+      launch TaskWindowProbe
+      parent=$display
+      # shellcheck disable=SC2329 # invoked through until_ok
+      parent_mapped() { wm LIST | grep -q "display=$parent package=dev.sargunv.innkeeper.probes .*window=yes"; }
+      until_ok parent_mapped
+      s am start --display "$parent" --activity-single-top \
+        -n dev.sargunv.innkeeper.probes/.TaskWindowProbe --ez dialog true >/dev/null
+      until_ok file_has "$bridge_log" "window [0-9]+ dialog parent=Some\\($parent\\) crop=Some"
       # shellcheck disable=SC2329 # invoked through until_ok
       dialog_sized() {
-        desktop Geometry dev.sargunv.Innkeeper.dev.sargunv.innkeeper.probes >"$T/dialog.txt" &&
+        desktop DialogGeometry dev.sargunv.Innkeeper.dev.sargunv.innkeeper.probes >"$T/dialog.txt" &&
           /usr/bin/python3 -c '
 import re, sys
 x, y, w, h = map(int, re.findall(r"-?\d+", open(sys.argv[1]).read()))
@@ -302,13 +309,17 @@ sys.exit(0 if 0 < w < 800 and 0 < h < 400 else 1)
         log_has InnkeeperDialogProbe clicked
       }
       until_ok dialog_clicked
-      wm CLOSE --ei display "$display" >/dev/null
-      echo "ok   a dialog-themed activity's window has its dialog's size and takes its clicks"
-      # A translucent activity that fills its display shows over a dim layer.
+      wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
+      echo "ok   an app's dialog task has its dialog's size over the app's window and takes its clicks"
+      # A translucent activity whose UI fills its display shows over a dim
+      # layer, and its own dialogs don't shrink its window to them.
       launch "DialogProbe\$Translucent"
       until_ok file_has "$bridge_log" "window $display dialog .*crop=None backdrop=true"
+      s am start --display "$display" --activity-single-top \
+        -n "dev.sargunv.innkeeper.probes/.DialogProbe\$Translucent" --ez popup true >/dev/null
+      until_ok log_has InnkeeperWm "display $display: [2-9] app windows, crop=null"
       wm CLOSE --ei display "$display" >/dev/null
-      echo 'ok   a translucent activity that fills its window has a backdrop'
+      echo "ok   a translucent activity's own dialog keeps its window whole, over a backdrop"
       /usr/bin/python3 "$here/app-settings.py"
       ;;
     audio)

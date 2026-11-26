@@ -7,7 +7,10 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 
-/** A second task deliberately starts on the caller's display, as an app's New Window does. */
+/**
+ * A second task deliberately starts on the caller's display, as an app's New Window does, or a
+ * dialog-themed activity starts in a new task, as a share target does.
+ */
 class TaskWindowProbe : Activity() {
   override fun onCreate(state: Bundle?) {
     super.onCreate(state)
@@ -22,6 +25,13 @@ class TaskWindowProbe : Activity() {
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     if (intent.getBooleanExtra("new-window", false)) newWindow()
+    // A dialog-themed activity in a task of its own, as a share target starts.
+    if (intent.getBooleanExtra("dialog", false)) {
+      startActivity(
+        Intent(this, DialogProbe::class.java)
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
+      )
+    }
   }
 
   private fun newWindow() {
