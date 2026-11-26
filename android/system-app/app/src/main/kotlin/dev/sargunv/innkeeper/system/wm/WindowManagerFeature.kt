@@ -1068,6 +1068,10 @@ class WindowManagerFeature(
     private const val DISPLAY_IME_POLICY_LOCAL = 0
 
     // DisplayManager.VIRTUAL_DISPLAY_FLAG_* (several are @SystemApi or hidden).
+    // A private display hides from every uid but its owner and the apps on it, so SystemUI would
+    // skip the app's toasts as "scheduled on unavailable display". OWN_CONTENT_ONLY still keeps it
+    // from mirroring display 0.
+    private const val FLAG_PUBLIC = 1 shl 0
     private const val FLAG_SECURE = 1 shl 2 // CAPTURE_SECURE_VIDEO_OUTPUT: FLAG_SECURE windows show
     private const val FLAG_OWN_CONTENT_ONLY = 1 shl 3 // no mirroring of display 0
     private const val FLAG_SUPPORTS_TOUCH = 1 shl 6
@@ -1077,7 +1081,8 @@ class WindowManagerFeature(
     private const val FLAG_ALWAYS_UNLOCKED = 1 shl 12 // ADD_ALWAYS_UNLOCKED_DISPLAY
     private const val FLAG_OWN_FOCUS = 1 shl 14 // per-display focus (needs TRUSTED)
     const val FLAGS =
-      FLAG_SECURE or
+      FLAG_PUBLIC or
+        FLAG_SECURE or
         FLAG_OWN_CONTENT_ONLY or
         FLAG_SUPPORTS_TOUCH or
         FLAG_DESTROY_CONTENT_ON_REMOVAL or

@@ -14,8 +14,9 @@ import android.util.Log
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.TextView
+import android.widget.Toast
 
-/** Observable per-window display and keep-awake requests on disposable test desktops. */
+/** Observable per-window display, keep-awake and toast requests on disposable test desktops. */
 class WindowProbe : Activity() {
   private lateinit var text: TextView
   private var wakeLock: PowerManager.WakeLock? = null
@@ -42,6 +43,9 @@ class WindowProbe : Activity() {
               wakeLock!!.acquire()
             }
           }
+          "toast" ->
+            Toast.makeText(this@WindowProbe, intent.getStringExtra("text"), Toast.LENGTH_LONG)
+              .show()
         }
       }
     }
