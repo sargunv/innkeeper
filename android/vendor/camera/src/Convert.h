@@ -32,8 +32,13 @@ struct YuvTarget {
 // neighbour is enough for preview and code scanning.
 void scaleNv12(const Nv12& src, const YuvTarget& dst);
 
-// Encodes a tightly packed I420 image as a baseline JFIF JPEG at `quality`
-// (1 to 100).
+// Expands a tightly packed I420 image from the limited range camera frames
+// use (BT.601 Y 16 to 235, Cb and Cr 16 to 240) to the full range JPEG's
+// JFIF colour space needs.
+void expandRange(uint8_t* i420, uint32_t width, uint32_t height);
+
+// Encodes a tightly packed, full-range I420 image as a baseline JFIF JPEG at
+// `quality` (1 to 100).
 std::vector<uint8_t> encodeJpeg(
   const uint8_t* i420, uint32_t width, uint32_t height, int quality
 );

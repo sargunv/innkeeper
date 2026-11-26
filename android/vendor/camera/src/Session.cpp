@@ -350,6 +350,7 @@ bool Session::fill(const Stream& s, Buffer& b, const Frame& f, int quality) {
     uint8_t* cb = i420.data() + size_t(w) * h;
     YuvTarget t{i420.data(), cb, cb + size_t(cw) * ch, w, h, w, cw, 1};
     scaleNv12(src, t);
+    expandRange(i420.data(), w, h);
     return b.writeJpeg(encodeJpeg(i420.data(), w, h, quality));
   }
   YuvTarget t;

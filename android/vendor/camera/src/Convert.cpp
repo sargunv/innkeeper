@@ -46,6 +46,19 @@ void scaleNv12(const Nv12& src, const YuvTarget& dst) {
   }
 }
 
+void expandRange(uint8_t* i420, uint32_t width, uint32_t height) {
+  uint8_t luma[256], chroma[256];
+  for (int v = 0; v < 256; v++) {
+    int y = std::clamp(v, 16, 235), c = std::clamp(v, 16, 240);
+    luma[v] = uint8_t(((y - 16) * 255 + 109) / 219);
+    chroma[v] = uint8_t(((c - 16) * 255 + 112) / 224);
+  }
+  const size_t ys = size_t(width) * height;
+  const size_t cs = 2 * size_t((width + 1) / 2) * ((height + 1) / 2);
+  for (size_t i = 0; i < ys; i++) i420[i] = luma[i420[i]];
+  for (size_t i = ys; i < ys + cs; i++) i420[i] = chroma[i420[i]];
+}
+
 namespace {
 
 // ITU T.81 Annex K: quantization tables in natural order, Huffman tables.

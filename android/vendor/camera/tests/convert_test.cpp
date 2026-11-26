@@ -84,6 +84,14 @@ void cropsToTheAspectRatio() {
   CHECK(o.back() == 0xee);
 }
 
+void expandsToFullRange() {
+  // 4x2: Y black, white, below black and above white; then Cb, Cr.
+  uint8_t img[] = {16, 235, 0, 255, 126, 125, 16, 240, 128, 128, 16, 240};
+  expandRange(img, 4, 2);
+  const uint8_t want[] = {0, 255, 0, 255, 128, 127, 0, 255, 128, 128, 0, 255};
+  CHECK(memcmp(img, want, sizeof(want)) == 0);
+}
+
 void jpegStream(const char* path) {
   const uint32_t w = 37, h = 21;
   std::vector<uint8_t> i420(w * h + 2 * 19 * 11);
@@ -121,6 +129,7 @@ int main(int argc, char** argv) {
   sameSizeIsACopy();
   planarWithStrides();
   cropsToTheAspectRatio();
+  expandsToFullRange();
   jpegStream(argc > 1 ? argv[1] : nullptr);
   return 0;
 }
