@@ -52,8 +52,9 @@ ScopedAStatus Device::open(
 ) {
   if (!callback) return error(kIllegalArgument);
   std::lock_guard lock(mMutex);
-  // cameraserver closes a session before it opens the next one.
-  if (mSession.lock()) return error(kCameraInUse);
+  // cameraserver closes a session before it opens the next one. A closed
+  // session can outlive close() until cameraserver drops its reference.
+  if (auto s = mSession.lock(); s && !s->isClosed()) return error(kCameraInUse);
   auto s = ndk::SharedRefBase::make<Session>(callback);
   mSession = s;
   *out = s;

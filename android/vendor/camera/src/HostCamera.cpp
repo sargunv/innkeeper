@@ -132,9 +132,10 @@ void HostCamera::readEvents() {
     std::lock_guard lock(mMutex);
     if (p.type == kStatus && p.len >= 1) {
       uint8_t st = p.body[0];
-      mState = st == kRunning  ? State::Running
-               : st == kDenied ? State::Denied
-                               : State::Ended;
+      mState = st == kRunning             ? State::Running
+               : st == kDenied            ? State::Denied
+               : mState == State::Running ? State::Lost
+                                          : State::Ended;
       LOGI("host camera status %u", st);
     } else if (p.type == kFrame && p.len >= 16) {
       uint32_t slot = lxb_u32(p.body);
@@ -149,8 +150,8 @@ void HostCamera::readEvents() {
     mCond.notify_all();
   }
   std::lock_guard lock(mMutex);
-  if (mState == State::Starting || mState == State::Running)
-    mState = State::Ended;
+  if (mState == State::Starting) mState = State::Ended;
+  if (mState == State::Running) mState = State::Lost;
   mCond.notify_all();
 }
 

@@ -27,7 +27,8 @@ struct Frame {
 
 class HostCamera {
  public:
-  enum class State { Starting, Running, Denied, Ended };
+  // Lost: the stream ran, then ended, as when the camera is unplugged.
+  enum class State { Starting, Running, Denied, Ended, Lost };
 
   ~HostCamera();
 

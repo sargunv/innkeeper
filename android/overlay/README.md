@@ -64,7 +64,7 @@ above. `tools/dev/footprint.sh` shows what a session holds.
 | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | `system/priv-app/CellBroadcastLegacyApp`, `apex/com.android.cellbroadcast/priv-app/*`                         | emergency alerts arrive over a modem                                                  |
 | `product/app/messaging`, `product/priv-app/ImsServiceEntitlement`                                             | SMS and carrier IMS need a modem                                                      |
-| `product/app/Camera2`                                                                                         | no camera                                                                             |
+| `product/app/Camera2`                                                                                         | apps use the camera themselves, and the desktop has its own camera app                |
 | `system_ext/priv-app/Launcher3QuickStep` (windowed profiles only; phone mode keeps the image's)               | HOME is the system app’s empty activity; the desktop owns launches and task switching |
 | `product/app/QuickSearchBox`                                                                                  | the home screen's search widget; nobody sees the launcher                             |
 | `system/app/Traceur`, `system/priv-app/DeviceDiagnostics`, `system/priv-app/DynamicSystemInstallationService` | on-device tracing, trade-in diagnostics, GSI installs                                 |

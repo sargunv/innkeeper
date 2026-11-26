@@ -12,6 +12,8 @@
 
 namespace innkeeper::camera {
 
+class Session;
+
 namespace device = aidl::android::hardware::camera::device;
 namespace provider = aidl::android::hardware::camera::provider;
 namespace common = aidl::android::hardware::camera::common;
@@ -45,7 +47,7 @@ class Device : public device::BnCameraDevice {
 
  private:
   std::mutex mMutex;
-  std::weak_ptr<device::ICameraDeviceSession> mSession;
+  std::weak_ptr<Session> mSession;
 };
 
 class Provider : public provider::BnCameraProvider {

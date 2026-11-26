@@ -91,6 +91,11 @@ Session::Session(std::shared_ptr<device::ICameraDeviceCallback> callback)
 
 Session::~Session() { close(); }
 
+bool Session::isClosed() {
+  std::lock_guard lock(mMutex);
+  return mClosed;
+}
+
 ScopedAStatus Session::close() {
   {
     std::lock_guard lock(mMutex);
@@ -100,10 +105,13 @@ ScopedAStatus Session::close() {
   mCond.notify_all();
   if (mWorker.joinable()) mWorker.join();
   mHost.stop();
-  std::lock_guard lock(mMutex);
-  for (auto& p : mQueue) fail(p, false);
-  mQueue.clear();
-  mBuffers.clear();
+  std::deque<Pending> dropped;
+  {
+    std::lock_guard lock(mMutex);
+    dropped.swap(mQueue);
+    mBuffers.clear();
+  }
+  for (auto& p : dropped) fail(p, false);
   LOGI("session closed");
   return ScopedAStatus::ok();
 }
@@ -167,8 +175,11 @@ ScopedAStatus Session::constructDefaultRequestSettings(
 ScopedAStatus Session::flush() {
   std::deque<Pending> dropped;
   {
-    std::lock_guard lock(mMutex);
+    std::unique_lock lock(mMutex);
     dropped.swap(mQueue);
+    // flush() returns once nothing is outstanding, and the request in
+    // progress has an earlier frame number than the dropped ones.
+    mCond.wait(lock, [&] { return !mBusy; });
   }
   for (auto& p : dropped) fail(p, false);
   return ScopedAStatus::ok();
@@ -203,6 +214,11 @@ ScopedAStatus Session::processCaptureRequest(
 ) {
   *out = 0;
   std::lock_guard lock(mMutex);
+  // Requests queued before a bad one in the same call still go to the worker.
+  struct Wake {
+    std::condition_variable& c;
+    ~Wake() { c.notify_all(); }
+  } wake{mCond};
   for (const auto& c : cachesToRemove) mBuffers.erase({c.streamId, c.bufferId});
   if (mClosed) return error(kInternalError);
   for (const CaptureRequest& r : requests) {
@@ -234,7 +250,6 @@ ScopedAStatus Session::processCaptureRequest(
     mQueue.push_back(std::move(p));
     (*out)++;
   }
-  mCond.notify_all();
   return ScopedAStatus::ok();
 }
 
@@ -269,17 +284,24 @@ void Session::work() {
     Pending p;
     {
       std::unique_lock lock(mMutex);
+      mBusy = false;
+      mCond.notify_all();
       mCond.wait(lock, [&] { return mClosed || !mQueue.empty(); });
       if (mClosed) return;
       p = std::move(mQueue.front());
       mQueue.pop_front();
+      mBusy = true;
     }
     if (mDeviceError) {
       fail(p, false);
       continue;
     }
-    if (mHost.state() == HostCamera::State::Denied) {
-      LOGW("the desktop denied the camera");
+    HostCamera::State st = mHost.state();
+    if (st == HostCamera::State::Denied || st == HostCamera::State::Lost) {
+      LOGW(
+        st == HostCamera::State::Denied ? "the desktop denied the camera"
+                                        : "the desktop's camera stream ended"
+      );
       mDeviceError = true;
       fail(p, true);
       continue;

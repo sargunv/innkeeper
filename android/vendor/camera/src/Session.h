@@ -3,8 +3,9 @@
 // requests in order and fills each output buffer from the latest frame the
 // bridge streamed. Until the desktop's first frame arrives, for example while
 // the portal's consent dialog is open, frames are black, so cameraserver's
-// pipeline keeps moving. If the user denies the camera, the session reports
-// ERROR_DEVICE. Metadata travels inline, without FMQs.
+// pipeline keeps moving. If the user denies the camera, or the desktop's
+// stream ends after it ran, the session reports ERROR_DEVICE. Metadata travels
+// inline, without FMQs.
 #pragma once
 
 #include <condition_variable>
@@ -32,6 +33,8 @@ class Session : public device::BnCameraDeviceSession {
  public:
   explicit Session(std::shared_ptr<device::ICameraDeviceCallback> callback);
   ~Session() override;
+
+  bool isClosed();
 
   ndk::ScopedAStatus close() override;
   ndk::ScopedAStatus configureStreams(
@@ -102,6 +105,8 @@ class Session : public device::BnCameraDeviceSession {
   std::map<std::pair<int32_t, int64_t>, std::shared_ptr<Buffer>> mBuffers;
   std::vector<uint8_t> mSettings;
   bool mClosed = false;
+  // The worker is processing a request it took from mQueue.
+  bool mBusy = false;
   bool mDeviceError = false;
   std::thread mWorker;
   Frame mFrame;
