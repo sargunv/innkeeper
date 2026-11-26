@@ -1700,7 +1700,7 @@ pub fn run(
         buffers: HashMap::new(),
         params: HashMap::new(),
         seat: Seat::new(bind_opt(&globals, &qh, 1), &globals, &qh),
-        clipboard: data_device::Clipboard::new(&globals, &qh, &shared, &ev)?,
+        clipboard: data_device::Clipboard::new(&conn, &globals, &qh, &shared, &ev)?,
         cursors: HashMap::new(),
         cursor_surface: None,
         quit: false,
