@@ -129,14 +129,24 @@ translucent colour, such as the dim around a Material dialog's inset background,
 the bridge trims the crop to what lies inside it. The display keeps its size, so
 the dialog keeps the layout it would have in a full window.
 
+Whether a task is a dialog is settled by the first windows it draws. Once a
+window shows its whole display, it never crops again. Some apps make every
+activity translucent, for example to swipe back to the activity behind, and draw
+their own full-display UI. Their popups and dialogs are windows that leave part
+of the display uncovered, but they must not shrink the window to the popup. The
+cost is that a translucent task that draws its own window first and opens its
+dialog after the windows settle (150 ms) shows at full size.
+
 The window's parent is the window whose app started the task
 (`xdg_toplevel.set_parent`), so the desktop places it over that window.
 `xdg_dialog_v1` would also make it modal, but it is newer than the desktop
 baseline. When the window manager knows the task is translucent before the
-window maps, the bridge holds the window's frames until the crop is known, for
-at most 1.5 s, so the window maps once, at the dialog's size. A translucent
-activity that fills its display, such as a floating button, shows over a dim
-layer instead of the desktop.
+window maps, the bridge holds the window's frames until the task draws and its
+windows settle, so the window maps once, at the dialog's size. An opaque task,
+such as a translucent trampoline's next activity, ends the hold at once. If the
+task doesn't draw within 3 s, as in a slow cold start, the window maps anyway. A
+translucent activity that fills its display, such as a floating button, shows
+over a dim layer instead of the desktop.
 
 ### Hidden windows
 

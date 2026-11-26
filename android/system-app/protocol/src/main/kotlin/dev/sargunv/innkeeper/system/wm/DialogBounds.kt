@@ -44,4 +44,32 @@ object DialogBounds {
     }
     return union?.takeUnless { it.width == width && it.height == height }
   }
+
+  /** What a window shows next: nothing yet, or [Show.crop] of its display (null: all of it). */
+  sealed interface Shape {
+    object Wait : Shape
+
+    data class Show(val crop: Rect?) : Shape
+  }
+
+  /**
+   * One window's choice between a dialog and its whole display. A translucent task whose first
+   * drawn windows leave part of the display uncovered is a dialog. Once the window shows its whole
+   * display, it never crops again, so the popups and dialogs of a translucent app with its own
+   * full-display UI, such as one that swipes back to the activity behind it, don't shrink it.
+   */
+  class Latch {
+    private var whole = false
+
+    /**
+     * The shape for a task that is [translucent] or not, with the app [frames] of its
+     * [width]×[height] display. A translucent task waits until it draws a window.
+     */
+    fun next(translucent: Boolean, width: Int, height: Int, frames: List<Rect>): Shape {
+      if (translucent && !whole && frames.isEmpty()) return Shape.Wait
+      val crop = if (translucent && !whole) crop(width, height, frames) else null
+      if (crop == null) whole = true
+      return Shape.Show(crop)
+    }
+  }
 }

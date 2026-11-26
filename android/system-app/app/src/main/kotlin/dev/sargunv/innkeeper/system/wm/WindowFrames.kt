@@ -15,6 +15,9 @@ import android.window.WindowInfosListener
 class WindowFrames(private val changed: (Map<Int, List<DialogBounds.Rect>>) -> Unit) :
   WindowInfosListener() {
   private var last: Map<Int, List<DialogBounds.Rect>>? = null
+  /** The listener is registered, so frames arrive. */
+  var active = false
+    private set
 
   fun start(context: Context) {
     // Without the permission, registering aborts the process.
@@ -27,6 +30,7 @@ class WindowFrames(private val changed: (Map<Int, List<DialogBounds.Rect>>) -> U
     }
     try {
       report(register().first)
+      active = true
     } catch (e: Exception) {
       Log.w(WindowManagerFeature.TAG, "window infos: $e")
     }
